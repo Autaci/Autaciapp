@@ -37,6 +37,7 @@ window.__standalone = true;
 (function(){
   firebase.initializeApp(firebaseConfig);
   const fdb = firebase.firestore(), auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
   let resolveReady; const ready = new Promise(r => resolveReady = r);
   const randomCode = () => Array.from({length: 6}, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
   function showLogin(msg){
