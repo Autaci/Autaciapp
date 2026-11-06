@@ -676,7 +676,7 @@ function taskCard(t){
       el("div", {class:"task-top"}, el("h3", {text:t.title||"Bez názvu"}), el("span", {class:"due "+due.cls, text:due.text})),
       el("span", {class:"kind"+(t.needsSubmission===false?" tick-only":""), text: t.needsSubmission===false ? "Stačí odškrtnout" : "Povinné odevzdání"}),
       state.owner ? el("span", {class:"kind tick-only", text: WEIGHTS[taskWeight(t)].name + " · " + WEIGHTS[taskWeight(t)].pts + " b"}) : null,
-      mgr() && Array.isArray(t.visibleTo) ? el("span", {class:"kind tick-only", text:"Vidí jen: " + t.visibleTo.map(nameOf).join(", ")}) : null,
+      t.private ? el("span", {class:"kind tick-only", text:"🔒 Jen pro mě"}) : mgr() && Array.isArray(t.visibleTo) ? el("span", {class:"kind tick-only", text:"Vidí jen: " + t.visibleTo.map(nameOf).join(", ")}) : null,
       t.detail ? el("p", {class:"detail", text:t.detail}) : null
     ),
     el("div", {class:"people"}, people.length ? people.map(uid => personBlock(t, uid)) : el("div", {class:"person"}, el("span", {class:"pill", text:"Zatím se nikdo nepřipojil"}))),
@@ -707,6 +707,7 @@ function renderVis(){
   const prev = {}; box.querySelectorAll("input").forEach(i => prev[i.value] = i.checked);
   box.replaceChildren();
   box.append(el("label", {for:"nt-v-all"}, el("input", {type:"checkbox", id:"nt-v-all", value:"all", checked: prev.all !== undefined ? prev.all : true}), "Všichni"));
+  box.append(el("label", {for:"nt-v-me"}, el("input", {type:"checkbox", id:"nt-v-me", value:"me", checked: !!prev.me, onchange: ev => { if (ev.target.checked) box.querySelectorAll("input").forEach(i => { if (i.value !== "me") i.checked = false; }); }}), "Jen já"));
   for (const uid of workers()) {
     if (state.members[uid].boss) continue;
     const id = "nt-v-"+uid;
@@ -761,16 +762,18 @@ function setupNewForm(){
     const title = $("nt-title").value.trim(), detail = $("nt-detail").value.trim(), due = $("nt-due").value;
     const all = $("nt-a-all").checked;
     const picked = [...$("nt-assign").querySelectorAll("input")].filter(i => i.checked && i.value !== "all").map(i => i.value);
-    const assignees = all ? "all" : picked;
+    let assignees = all ? "all" : picked;
     const needsSubmission = $("nt-needs").checked;
     const visAll = $("nt-v-all").checked;
-    const visPicked = [...$("nt-vis").querySelectorAll("input")].filter(i => i.checked && i.value !== "all").map(i => i.value);
-    const visibleTo = visAll ? "all" : visPicked;
-    if (!visAll && !visPicked.length) { toast("Vyber, kdo úkol uvidí"); return; }
+    const onlyMe = $("nt-v-me").checked;
+    const visPicked = onlyMe ? [state.uid] : [...$("nt-vis").querySelectorAll("input")].filter(i => i.checked && i.value !== "all" && i.value !== "me").map(i => i.value);
+    const visibleTo = onlyMe ? [state.uid] : visAll ? "all" : visPicked;
+    if (!onlyMe && !visAll && !visPicked.length) { toast("Vyber, kdo úkol uvidí"); return; }
     if (!title) { toast("Napiš, co je potřeba udělat"); return; }
-    if (!all && !picked.length) { toast("Vyber, pro koho úkol je"); return; }
+    if (onlyMe) assignees = [state.uid];
+    else if (!all && !picked.length) { toast("Vyber, pro koho úkol je"); return; }
     $("nt-submit").disabled = true;
-    try { await state.db.collection("tasks").add({title, detail, due, assignees, needsSubmission, visibleTo, weight: $("nt-weight").value, toJourney: $("nt-journey").checked, createdAt:Date.now()}); $("nt-journey").checked=true; $("nt-title").value=""; $("nt-needs").checked=false; $("nt-detail").value=""; toast("Úkol zadán"); }
+    try { await state.db.collection("tasks").add({title, detail, due, assignees, needsSubmission, visibleTo, private: onlyMe, createdBy: state.uid, weight: $("nt-weight").value, toJourney: !onlyMe && $("nt-journey").checked, createdAt:Date.now()}); $("nt-journey").checked=true; $("nt-v-me").checked=false; $("nt-v-all").checked=true; $("nt-title").value=""; $("nt-needs").checked=false; $("nt-detail").value=""; toast("Úkol zadán"); }
     catch(e){ handleWriteError(e); }
     $("nt-submit").disabled = false;
   });
@@ -2135,7 +2138,7 @@ render();
     if (flag === "tasks") clearTimeout(timer);
     render();
   }, () => { clearTimeout(timer); state.loaded[flag] = true; if (!state.myDoc) { render(); return; } $("status").hidden = false; $("status").textContent = "Spojení s úkoly se přerušilo. Načti stránku znovu."; });
-  watch("tasks", s => { state.tasks = s.docs.map(d => ({id:d.id, ...d.data()})); }, "tasks");
+  watch("tasks", s => { state.tasks = s.docs.map(d => ({id:d.id, ...d.data()})).filter(t => !t.private || t.createdBy === state.uid); }, "tasks");
   watch("subs", s => {
     const subs = {}, members = {}, membersRaw = {}, membersAll = {}; let mine = null;
     for (const d of s.docs) {
