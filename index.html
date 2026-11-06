@@ -377,6 +377,7 @@ select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px
 .task-del.confirm span{font-weight:600;color:var(--bad)}
 .join-code{margin:0;font-size:15px}.join-code b{font:700 18px var(--mono);letter-spacing:.12em;background:var(--accent-soft);padding:2px 8px;border-radius:6px}
 .acct-hint{margin:0 0 6px;color:#5b5560;font-size:14px}.acct-mail{display:block;color:#5b5560}
+.att-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.att{position:relative;display:block;width:96px;height:96px;border-radius:10px;overflow:hidden;border:1px solid #ddd;background:#f4f2f5 repeating-conic-gradient(#eee 0 25%,#fff 0 50%) 0 0/16px 16px;margin:0}.att img{width:100%;height:100%;object-fit:contain}.att.missing::after{content:"Příloha chybí";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:#777;text-align:center}.att-x{position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;border:0;background:#000;color:#fff;font-size:15px;line-height:1;cursor:pointer;padding:0}.att-add{background:#fff;border:1.5px dashed #a970b9;color:#000;font-weight:700}.att-hint{margin:2px 0 0;font-size:12.5px;color:#5b5560}.sub-text{white-space:pre-wrap;display:block}.sub-text a{color:#1f78b4;word-break:break-all}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
 .legend span{display:flex;align-items:center;gap:6px}
 .legend i{width:14px;height:14px;border-radius:50%;display:inline-block}
@@ -600,6 +601,50 @@ function renderSummary(){
   }
 }
 
+state.pendFiles = {}; const FILECACHE = new Map();
+function linkify(text){
+  const out = el("span", {class:"sub-text"}); let last = 0;
+  for (const m of text.matchAll(/https?:\/\/[^\s<]+/g)) {
+    out.append(text.slice(last, m.index), el("a", {href:m[0], target:"_blank", rel:"noopener noreferrer", text:m[0]})); last = m.index + m[0].length;
+  }
+  out.append(text.slice(last)); return out;
+}
+function attList(ids){
+  if (!Array.isArray(ids) || !ids.length) return null;
+  const box = el("div", {class:"att-list"});
+  for (const id of ids) {
+    const img = el("img", {alt:"Příloha"}), a = el("a", {class:"att", target:"_blank", rel:"noopener", title:"Otevřít ve velkém"}, img);
+    a.addEventListener("click", ev => { ev.preventDefault(); if (img.src) { const w = window.open(); if (w) { w.document.title = "Příloha"; w.document.body.style.cssText = "margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"; const big = w.document.createElement("img"); big.src = img.src; big.style.cssText = "max-width:100%;max-height:100vh"; w.document.body.append(big); } } });
+    const show = d => { if (d && d.data) { img.src = d.data; img.alt = d.name || "Příloha"; } else a.classList.add("missing"); };
+    if (FILECACHE.has(id)) show(FILECACHE.get(id));
+    else state.db.doc("files/" + id).get().then(snap => { const d = snap.exists ? snap.data() : null; FILECACHE.set(id, d); show(d); }).catch(() => a.classList.add("missing"));
+    box.append(a);
+  }
+  return box;
+}
+function shrinkImage(file){
+  return new Promise((resolve, reject) => {
+    if (!/^image\//.test(file.type)) return reject(new Error("Přikládat jde jen obrázky. Video vlož jako odkaz."));
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      URL.revokeObjectURL(url);
+      const enc = (max, q) => {
+        const k = Math.min(1, max / Math.max(im.width, im.height)), c = document.createElement("canvas");
+        c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+        const g = c.getContext("2d");
+        g.drawImage(im, 0, 0, c.width, c.height); let d = c.toDataURL("image/webp", q);
+        if (!d.startsWith("data:image/webp")) { d = c.toDataURL("image/png"); if (d.length > 700000) { g.globalCompositeOperation = "destination-over"; g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); d = c.toDataURL("image/jpeg", q); } }
+        return d;
+      };
+      let d = enc(1600, .85);
+      for (const [m, q] of [[1300, .8], [1000, .75], [800, .7], [600, .65]]) { if (d.length <= 700000) break; d = enc(m, q); }
+      if (d.length > 700000) return reject(new Error("Obrázek je moc velký"));
+      resolve(d);
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Obrázek se nepodařilo načíst")); };
+    im.src = url;
+  });
+}
 function personBlock(t, uid){
   const st = personState(t, uid);
   const s = state.subs[key(t.id, uid)], r = state.reviews[key(t.id, uid)];
@@ -627,7 +672,7 @@ function personBlock(t, uid){
       el("span", {class:"pill "+(st==="todo"?"":st), text:LABEL[st]})
     )
   );
-  if (s && s.text) block.append(el("div", {class:"sub"}, el("small", {text:"Odevzdání · "+new Date(s.submittedAt).toLocaleString("cs-CZ",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"})}), s.text));
+  if (s && s.text) block.append(el("div", {class:"sub"}, el("small", {text:"Odevzdání · "+new Date(s.submittedAt).toLocaleString("cs-CZ",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"})}), linkify(s.text), attList(s.files)));
   if (r && r.note && st === "redo") block.append(el("div", {class:"note"+(r.status==="ok"?" ok":"")}, el("b", {text:"Hodnocení: "}), r.note));
 
   if (isMe && st !== "ok") {
@@ -635,14 +680,36 @@ function personBlock(t, uid){
     const ta = el("textarea", {id, placeholder: st==="redo" ? "Pošli opravenou verzi" : "Napiš sem, co jsi udělal (odkazy, seznam, poznámky)"});
     if (s && s.text && st!=="redo") ta.value = s.text;
     const btn = el("button", {type:"button", class:"primary", text: s && s.text ? "Odevzdat znovu" : "Odevzdat"});
+    const pend = state.pendFiles[t.id] || (state.pendFiles[t.id] = []);
+    const prevBox = el("div", {class:"att-list"});
+    const drawPend = () => prevBox.replaceChildren(...pend.map((f, i) => el("figure", {class:"att"}, el("img", {src:f.data, alt:f.name}),
+      el("button", {type:"button", class:"att-x", "aria-label":"Odebrat " + f.name, onclick:() => { pend.splice(i, 1); drawPend(); }, text:"×"}))));
+    drawPend();
+    const fileIn = el("input", {type:"file", accept:"image/*", multiple:true, hidden:true, id:"file-"+t.id});
+    fileIn.addEventListener("change", async () => {
+      for (const f of [...fileIn.files]) {
+        if (pend.length >= 6) { toast("Najednou max 6 obrázků"); break; }
+        try { pend.push({name:f.name, data: await shrinkImage(f)}); } catch(e){ toast(e.message || "Obrázek se nepodařilo načíst"); }
+      }
+      fileIn.value = ""; drawPend();
+    });
+    const addBtn = el("button", {type:"button", class:"att-add", onclick:() => fileIn.click(), text:"＋ Přiložit obrázky"});
     btn.addEventListener("click", async () => {
       const text = ta.value.trim();
-      if (!text) { toast("Napiš, co odevzdáváš"); ta.focus(); return; }
-      btn.disabled = true;
-      try { await saveItem(t.id, {text, submittedAt:Date.now()}); toast("Odevzdáno"); }
-      catch(e){ handleWriteError(e); btn.disabled = false; }
+      if (!text && !pend.length) { toast("Napiš, co odevzdáváš, nebo přilož obrázek"); ta.focus(); return; }
+      btn.disabled = true; btn.textContent = pend.length ? "Nahrávám…" : btn.textContent;
+      try {
+        const ids = [];
+        for (const f of pend) { const ref = await state.db.collection("files").add({data:f.data, name:f.name, task:t.id, uid:state.uid, createdAt:Date.now()}); ids.push(ref.id); }
+        const keep = st === "redo" ? [] : ((s && s.files) || []);
+        await saveItem(t.id, {text: text || "Přiložené obrázky", files: keep.concat(ids), submittedAt:Date.now()});
+        state.pendFiles[t.id] = []; toast("Odevzdáno");
+      }
+      catch(e){ handleWriteError(e); btn.disabled = false; btn.textContent = "Odevzdat"; }
     });
-    block.append(el("div", {class:"form"}, el("label", {class:"lbl", for:id, text:"Tvoje odevzdání"}), ta, el("div", {class:"btns"}, btn)));
+    block.append(el("div", {class:"form"}, el("label", {class:"lbl", for:id, text:"Tvoje odevzdání"}), ta, prevBox,
+      el("p", {class:"att-hint", text:"Video nahraj na YouTube (jako neveřejné) nebo na Google Drive a vlož sem odkaz."}),
+      el("div", {class:"btns"}, addBtn, fileIn, btn)));
   }
 
   if (mgr() && state.db && st === "ok" && s && s.text) {
