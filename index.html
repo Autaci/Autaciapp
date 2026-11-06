@@ -676,7 +676,7 @@ function taskCard(t){
       el("div", {class:"task-top"}, el("h3", {text:t.title||"Bez názvu"}), el("span", {class:"due "+due.cls, text:due.text})),
       el("span", {class:"kind"+(t.needsSubmission===false?" tick-only":""), text: t.needsSubmission===false ? "Stačí odškrtnout" : "Povinné odevzdání"}),
       state.owner ? el("span", {class:"kind tick-only", text: WEIGHTS[taskWeight(t)].name + " · " + WEIGHTS[taskWeight(t)].pts + " b"}) : null,
-      t.private ? el("span", {class:"kind tick-only", text:"🔒 Jen pro mě"}) : mgr() && Array.isArray(t.visibleTo) ? el("span", {class:"kind tick-only", text:"Vidí jen: " + t.visibleTo.map(nameOf).join(", ")}) : null,
+      t.private ? el("span", {class:"kind tick-only", text:"🔒 Vidí jen " + ((state.members[t.createdBy] && state.members[t.createdBy].name) || "já")}) : mgr() && Array.isArray(t.visibleTo) ? el("span", {class:"kind tick-only", text:"Vidí jen: " + t.visibleTo.map(nameOf).join(", ")}) : null,
       t.detail ? el("p", {class:"detail", text:t.detail}) : null
     ),
     el("div", {class:"people"}, people.length ? people.map(uid => personBlock(t, uid)) : el("div", {class:"person"}, el("span", {class:"pill", text:"Zatím se nikdo nepřipojil"}))),
@@ -707,7 +707,7 @@ function renderVis(){
   const prev = {}; box.querySelectorAll("input").forEach(i => prev[i.value] = i.checked);
   box.replaceChildren();
   box.append(el("label", {for:"nt-v-all"}, el("input", {type:"checkbox", id:"nt-v-all", value:"all", checked: prev.all !== undefined ? prev.all : true}), "Všichni"));
-  box.append(el("label", {for:"nt-v-me"}, el("input", {type:"checkbox", id:"nt-v-me", value:"me", checked: !!prev.me, onchange: ev => { if (ev.target.checked) box.querySelectorAll("input").forEach(i => { if (i.value !== "me") i.checked = false; }); }}), "Jen já"));
+  box.append(el("label", {for:"nt-v-me"}, el("input", {type:"checkbox", id:"nt-v-me", value:"me", checked: !!prev.me, onchange: ev => { if (ev.target.checked) box.querySelectorAll("input").forEach(i => { if (i.value !== "me") i.checked = false; }); }}), (state.members[state.uid] && state.members[state.uid].name) || "Jen já"));
   for (const uid of workers()) {
     if (state.members[uid].boss) continue;
     const id = "nt-v-"+uid;
