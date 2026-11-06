@@ -1,0 +1,2154 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;font:14px system-ui,-apple-system,"Segoe UI",sans-serif}
+img{max-width:100%}
+[hidden]{display:none!important}
+#login{position:fixed;inset:0;z-index:100;background:#ffffff;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+#login .box{max-width:360px;width:100%;display:flex;flex-direction:column;gap:14px;text-align:center}
+#login h1{font:800 34px/1.1 system-ui;margin:0}
+#login p{margin:0;color:#5b5560}
+#login button{font:700 16px system-ui;padding:14px 18px;border-radius:12px;border:0;background:#a970b9;color:#000000;cursor:pointer}
+#login .err{color:#c62828;font-size:14px}
+#logout{display:block;margin:24px auto 40px;background:none;border:0;color:#5b5560;text-decoration:underline;cursor:pointer;font:14px system-ui}
+</style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+// ===== SEM VLOŽ SVŮJ firebaseConfig Z FIREBASE (krok 3 v návodu) =====
+const firebaseConfig = {
+  apiKey: "VLOZ_SEM",
+  authDomain: "VLOZ_SEM",
+  projectId: "VLOZ_SEM",
+  storageBucket: "VLOZ_SEM",
+  messagingSenderId: "VLOZ_SEM",
+  appId: "VLOZ_SEM"
+};
+// =====================================================================
+
+window.__standalone = true;
+(function(){
+  firebase.initializeApp(firebaseConfig);
+  const fdb = firebase.firestore(), auth = firebase.auth();
+  let resolveReady; const ready = new Promise(r => resolveReady = r);
+  const randomCode = () => Array.from({length: 6}, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
+  function showLogin(msg){
+    const l = document.getElementById("login"); if (!l) return;
+    l.hidden = false; const e = l.querySelector(".err"); e.textContent = msg || ""; e.hidden = !msg;
+  }
+  window.__signIn = async () => {
+    try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+    catch (e) {
+      if (e && (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment")) { await auth.signInWithRedirect(new firebase.auth.GoogleAuthProvider()); return; }
+      showLogin("Přihlášení se nepovedlo: " + (e && e.message || e));
+    }
+  };
+  window.__signOut = () => auth.signOut().then(() => location.reload());
+  auth.onAuthStateChanged(async u => {
+    if (!u) { showLogin(); return; }
+    document.getElementById("login").hidden = true;
+    const ref = fdb.doc("config/app");
+    let cfg = null;
+    try { const s = await ref.get(); cfg = s.exists ? s.data() : null; } catch (e) { showLogin("Nedaří se spojit s databází. Zkontroluj nastavení Firestore (krok 4)."); return; }
+    if (!cfg) {
+      cfg = {ownerUid: u.uid, joinCode: randomCode(), createdAt: Date.now()};
+      try { await ref.set(cfg); } catch (e) { showLogin("Tým se nepodařilo založit: " + e.message); return; }
+    }
+    window.__appConfig = cfg;
+    resolveReady({u, cfg});
+  });
+  const dbApi = {doc: p => fdb.doc(p), collection: p => fdb.collection(p)};
+  window.claude = {use: async name => {
+    const {u, cfg} = await ready;
+    if (name === "db") return dbApi;
+    if (name === "user") return {isOwner: () => u.uid === cfg.ownerUid, canEdit: () => u.uid === cfg.ownerUid, id: async () => u.uid};
+    return null;
+  }};
+})();
+</script>
+</head>
+<body>
+<div id="login" hidden>
+  <div class="box">
+    <h1>Autaci</h1>
+    <p>Týmová appka. Přihlas se svým Google účtem.</p>
+    <button type="button" onclick="__signIn()">Přihlásit se přes Google</button>
+    <p class="err" hidden></p>
+  </div>
+</div>
+<title>Úkoly Autaci</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Righteous&display=swap">
+<style>
+/* Layout: one column; a team strip, the "who are you" picker, then task cards sorted by deadline, each with one row per assignee */
+:root{
+  color-scheme:light; --green:#66926d;
+  --bg:#ffffff; --surface:#ffffff; --sunk:#f1edf3; --ink:#000000; --muted:#5b5560; --line:#e2dce6;
+  --brand:#a970b9; --accent:#8a4f9d; --accent-ink:#000000; --accent-soft:#f1e6f5;
+  --ok:#4f7d57; --ok-soft:#e3eee5; --warn:#a85d00; --warn-soft:#fbecd6; --bad:#b4233a; --bad-soft:#fbe1e5;
+  --display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --body:"Figtree","Segoe UI",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media not all {:root.unused{ --warn:#f2b45c; --warn-soft:#3b2b12; --bad:#ff8597; --bad-soft:#40182071; color-scheme:dark}}
+:root.unused-too{ --warn:#f2b45c; --warn-soft:#3b2b12; --bad:#ff8597; --bad-soft:#40182071; color-scheme:dark}
+*{box-sizing:border-box}
+input[type=checkbox]{-webkit-appearance:none;appearance:none;width:20px;height:20px;margin:0;flex:none;border:2px solid var(--line);border-radius:6px;background:#ffffff;display:inline-grid;place-content:center;cursor:pointer;vertical-align:middle;accent-color:#66926d}
+input[type=checkbox]::before{content:"";width:11px;height:6px;border-left:2.5px solid #ffffff;border-bottom:2.5px solid #ffffff;transform:translateY(-1px) rotate(-45deg) scale(0);transition:transform .12s ease}
+input[type=checkbox]:checked{background:#66926d;border-color:#66926d}
+input[type=checkbox]:checked::before{transform:translateY(-1px) rotate(-45deg) scale(1)}
+input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--body)}
+.wrap{max-width:780px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 64px;display:flex;flex-direction:column;gap:22px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.brand{display:flex;flex-direction:column;gap:2px}
+.eyebrow{font:600 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+h1{font:800 clamp(30px,6vw,42px)/1.05 var(--display);letter-spacing:-.02em;margin:0}
+.who{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.who span{color:var(--muted);font-size:13px}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 14px;font:600 14px var(--body);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip:focus-visible,button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.notice{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;color:var(--muted);font-size:14px}
+.summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.stat b{font:800 22px/1 var(--display)}
+.stat small{color:var(--muted);font-size:12px}
+.stat .bar{height:6px;border-radius:99px;background:var(--sunk);overflow:hidden}
+.stat .bar i{display:block;height:100%;background:var(--ok);border-radius:99px}
+h2{font:700 13px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0}
+.list{display:flex;flex-direction:column;gap:14px}
+.task{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.task-head{padding:16px 18px 12px;display:flex;flex-direction:column;gap:6px}
+.task-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.task h3{font:700 19px/1.25 var(--display);margin:0;text-wrap:balance;min-width:0}
+.due{flex:none;font:600 12px/1 var(--mono);padding:6px 9px;border-radius:8px;background:var(--sunk);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.due.soon{background:var(--warn-soft);color:var(--warn)}
+.due.late{background:var(--bad-soft);color:var(--bad)}
+.due.done{background:var(--ok-soft);color:var(--ok)}
+.kind{align-self:flex-start;font:600 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:6px;background:var(--accent-soft);color:var(--accent)}
+.kind.tick-only{background:var(--sunk);color:var(--muted)}
+.toggle{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600}
+.cap{font:600 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:4px 6px;border-radius:5px;background:var(--accent-soft);color:var(--accent);margin-left:6px;vertical-align:middle}
+.detail{margin:0;color:var(--muted);white-space:pre-wrap;max-width:65ch}
+.people{border-top:1px solid var(--line);display:flex;flex-direction:column}
+.person{padding:12px 18px;display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line)}
+.person:first-child{border-top:0}
+.person-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.name{font-weight:700;display:flex;align-items:center;gap:10px}
+.tick{width:26px;height:26px;border-radius:8px;border:2px solid var(--line);display:grid;place-items:center;font-size:15px;font-weight:800;color:transparent;flex:none}
+.tick.ok{background:var(--ok);border-color:var(--ok);color:var(--surface)}
+.tick.sent{border-color:var(--accent);color:var(--accent)}
+.tick.redo{border-color:var(--bad);color:var(--bad)}
+.pill{font:600 12px/1 var(--body);padding:6px 10px;border-radius:99px;background:var(--sunk);color:var(--muted)}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.sent{background:var(--accent-soft);color:var(--accent)}
+.pill.redo{background:var(--bad-soft);color:var(--bad)}
+.sub{background:var(--sunk);border-radius:10px;padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}
+.sub small{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}
+.note{font-size:14px;color:var(--ink);background:var(--warn-soft);border-radius:10px;padding:8px 12px}
+.note.ok{background:var(--ok-soft)}
+.form{display:flex;flex-direction:column;gap:8px}
+textarea,input[type=text],input[type=date]{width:100%;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:10px 12px;font:15px/1.4 var(--body)}
+textarea{min-height:84px;resize:vertical}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+button{font:600 14px var(--body);border-radius:10px;padding:9px 14px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.tick.ok,.tick.ok{background:var(--green)!important;border-color:var(--green)!important;color:#ffffff!important}
+button.okb{background:var(--green);border-color:var(--green);color:#ffffff}
+.stat .bar i{background:var(--green)}
+.task,.stat,.empty,.notice{border-color:var(--line)}
+button.primary{background:var(--brand);border-color:var(--brand);color:var(--accent-ink)}
+.new{border-color:var(--brand)!important}
+h1{color:var(--ink)}
+.eyebrow::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--brand);margin-right:7px;vertical-align:0}
+button.okb{background:var(--ok);border-color:var(--ok);color:var(--surface)}
+button.badb{color:var(--bad);border-color:var(--bad)}
+button:disabled{opacity:.55;cursor:default}
+.new{background:var(--surface);border:1px dashed var(--accent);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.new h2{color:var(--accent)}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
+.assign{display:flex;gap:14px;flex-wrap:wrap;font-size:14px}
+.assign label{display:flex;gap:6px;align-items:center}
+label.lbl{font-size:12px;color:var(--muted);font-weight:600;display:flex;flex-direction:column;gap:4px}
+.empty{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 18px;color:var(--muted)}
+.empty b{display:block;color:var(--ink);font:700 17px var(--display);margin-bottom:4px}
+details.archive summary{cursor:pointer;font:700 13px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:6px 0}
+details.archive .list{margin-top:12px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;z-index:20}
+@media (max-width:520px){.summary{grid-template-columns:minmax(0,1fr)}.grid2{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:no-preference){.tick,.pill,button{transition:background .15s,border-color .15s,color .15s}}
+.tabs{display:flex;gap:6px;background:var(--sunk);border:1px solid var(--line);border-radius:12px;padding:4px;align-self:flex-start}
+.tabs a{font:700 14px var(--body);color:var(--muted);text-decoration:none;padding:8px 16px;border-radius:9px}
+.tabs a[aria-current="page"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.tabs a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.view{display:flex;flex-direction:column;gap:22px}
+.lvl{border:1px solid var(--line);border-radius:16px;padding:18px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:center}
+
+.lvl-badge small{font:700 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase}
+.lvl-badge b{font:800 34px/1 var(--display)}
+.lvl-badge{--hex:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);position:relative;width:88px;height:100px;flex:none;clip-path:var(--hex);background:#a970b9;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#000}
+.lvl-badge::before{content:"";position:absolute;inset:2.5px;clip-path:var(--hex);background:#ffffff}
+.lvl-badge small,.lvl-badge b{position:relative;z-index:1}
+.lvl-badge small{color:var(--accent)}
+.lvl-badge small{font:700 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase}
+.lvl-badge b{font:800 36px/1 var(--display)}
+.lvl-info{display:flex;flex-direction:column;gap:8px;min-width:0}
+.lvl-info h2{color:var(--ink);font:800 20px/1.2 var(--display);letter-spacing:0;text-transform:none}
+.xpbar{height:12px;border-radius:99px;background:var(--sunk);border:1px solid var(--line);overflow:hidden}
+.xpbar i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--green));border-radius:99px}
+.xp-meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:600 12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.people-xp{display:flex;gap:8px;flex-wrap:wrap}
+.people-xp span{font:600 13px var(--body);background:var(--sunk);border-radius:99px;padding:5px 11px}
+.people-xp b{font-family:var(--mono);font-size:12px;color:var(--ok);margin-left:4px}
+.space{position:relative;height:min(64vh,540px);min-height:340px;border-radius:18px;overflow:hidden;background:#000000;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.space.dragging{cursor:grabbing}
+#stars,#nebula{position:absolute;inset:0;width:100%;height:100%;display:block}
+@media (prefers-reduced-motion:no-preference){
+  .warp-in{animation:warpin 1.5s cubic-bezier(.16,.9,.3,1)}
+  @keyframes warpin{0%{transform:scale(.35);opacity:0;filter:blur(8px)}55%{opacity:1;filter:blur(0)}100%{transform:scale(1)}}
+  .mnode .core-orb{animation:corepulse 3.2s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+  @keyframes corepulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+}
+.space .tree{position:absolute;inset:0;min-width:0;max-width:none;margin:0}
+.space .tree svg{width:100%;height:100%;display:block;overflow:visible}
+.space-hint{position:absolute;left:14px;top:12px;font:600 11px var(--mono);letter-spacing:.06em;color:rgba(255,255,255,.45);pointer-events:none}
+.space-ctl{position:absolute;right:max(12px,env(safe-area-inset-right,0px));bottom:12px;display:flex;gap:6px}
+.space-ctl button{background:rgba(255,255,255,.08);color:#ffffff;border:1px solid rgba(255,255,255,.25);min-width:40px;backdrop-filter:blur(4px)}
+.space-ctl button:hover{background:rgba(255,255,255,.16)}
+
+.tree{min-width:620px;max-width:820px;margin:0 auto}
+.tree svg{display:block;width:100%;height:auto}
+.mnode{cursor:pointer;outline:none}
+.mnode .orb{fill:#141116;stroke:#3a3540;stroke-width:3}
+.mnode.ready .orb{fill:#1c1320;stroke:#a970b9}
+.mnode.done .orb{fill:#66926d;stroke:#a6d3ad}
+.mnode .glyph{fill:#5d5663;font:800 22px var(--display);text-anchor:middle}
+.mnode.ready .glyph{fill:#d7b3e2}
+.mnode.done .glyph{fill:#ffffff}
+.mnode .lbl{fill:#8b8490;font:600 17px var(--body)}
+.mnode.ready .lbl{fill:#eadcef}
+.mnode.done .lbl{fill:#ffffff}
+.mnode:hover .orb,.mnode.sel .orb,.mnode:focus-visible .orb{stroke:#ffffff;stroke-width:4}
+.ring{fill:none;stroke:#a970b9;stroke-width:2}
+.burst{fill:none;stroke:#a6d3ad;stroke-width:6;opacity:0}
+.core-t{fill:#000000;font:800 22px var(--display);text-anchor:middle;letter-spacing:.06em}
+.core-l{fill:#000000;font:700 12px var(--mono);text-anchor:middle;letter-spacing:.12em}
+.branch-lbl{fill:#a970b9;font:700 16px var(--mono);letter-spacing:.16em}
+@media (prefers-reduced-motion:no-preference){
+  .ring{transform-box:fill-box;transform-origin:center;animation:ringp 2s ease-out infinite}
+  @keyframes ringp{0%{transform:scale(.85);opacity:.9}100%{transform:scale(1.4);opacity:0}}
+  .spin{transform-box:fill-box;transform-origin:center;animation:spin 40s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .burst{transform-box:fill-box;transform-origin:center;animation:burst 1.1s ease-out 3}
+  @keyframes burst{0%{transform:scale(1);opacity:1}100%{transform:scale(3.4);opacity:0}}
+  .mnode.fresh .orb{transform-box:fill-box;transform-origin:center;animation:pop .7s cubic-bezier(.3,1.7,.5,1)}
+  @keyframes pop{0%{transform:scale(.4)}100%{transform:scale(1)}}
+  .path-open{stroke-dasharray:10 10;animation:flow 1.2s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-20}}
+}
+.evt-dot{fill:#66926d;stroke:#a6d3ad;stroke-width:3}
+.evt-d{fill:#a6d3ad;font:700 13px var(--mono);text-anchor:middle;letter-spacing:.04em}
+.evt-t{fill:#ffffff;font:600 16px var(--body);text-anchor:middle}
+.journal-list{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;border-left:3px solid var(--green);margin-left:6px}
+.journal-list li{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;padding:8px 0 8px 16px;position:relative}
+.journal-list li::before{content:"";position:absolute;left:-8.5px;top:14px;width:14px;height:14px;border-radius:50%;background:var(--green);border:3px solid var(--surface)}
+.j-date{font:600 12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums;min-width:86px}
+.j-text{flex:1;min-width:0;overflow-wrap:anywhere}
+.j-del{padding:4px 10px;font-size:12px;color:var(--muted)}
+.team{display:flex;flex-direction:column;gap:16px}
+.member{border:1px solid var(--line);border-radius:16px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;background:var(--surface)}
+.member.idle{border-color:var(--bad);box-shadow:inset 4px 0 0 var(--bad)}
+.m-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.m-name{display:flex;flex-direction:column;gap:2px}
+.m-name h3{font:800 22px/1.1 var(--display);margin:0}
+.m-xp{font:700 13px var(--mono);color:var(--ok)}
+.m-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.m-stats div{background:var(--sunk);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.m-stats b{font:800 18px/1.1 var(--display);overflow-wrap:anywhere}
+.m-stats small{font-size:12px;color:var(--muted)}
+.m-stats .bad b{color:var(--bad)}
+.m-sec{display:flex;flex-direction:column;gap:8px}
+.m-sec h4{margin:0;font:700 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.m-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.m-list li{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--line)}
+.m-list li:first-child{border-top:0}
+.m-list a{color:var(--accent);font-weight:600;overflow-wrap:anywhere}
+.m-task{display:flex;flex-direction:column;flex:1;min-width:0}
+.m-text{color:var(--muted);font-size:14px;overflow-wrap:anywhere;white-space:pre-wrap}
+.notice.req{color:var(--ink);border-color:var(--brand);display:flex;flex-direction:column;gap:10px}
+.m-vis{align-items:center}
+.m-empty{margin:0;color:var(--muted);font-size:14px}
+.grid3{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end}
+@media (max-width:560px){.m-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:minmax(0,1fr)}}
+.roles-head{align-items:flex-start;text-align:left}
+.roles-help{flex-basis:100%}
+.roles-help summary{cursor:pointer;font:600 14px var(--body);color:var(--accent);width:max-content}
+.roles-help[open] summary{margin-bottom:6px}
+.roles-legend{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:6px 0 0;font-size:14px}
+.roles-legend dt{font-weight:700}
+.roles-legend dd{margin:0;color:var(--muted)}
+.admin-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--line);border-radius:14px;padding:12px 16px;background:var(--surface)}
+.admin-row.removed{opacity:.6}
+.admin-name{display:flex;flex-direction:column;gap:2px;min-width:0}
+.admin-name b{font:700 17px var(--display)}
+.admin-name small{color:var(--muted);font-size:12px}
+.admin-ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#ffffff;color:var(--ink)}
+.tabs a[hidden]{display:none}
+.rank-log{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+.rank-log li{display:flex;align-items:center;gap:8px;font-size:14px;min-width:0}
+.rl-pts{font:700 13px var(--mono);color:var(--ok);min-width:44px;font-variant-numeric:tabular-nums}
+.rl-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#rankBox .roles-legend dd{font-size:13px}
+@media (prefers-reduced-motion:no-preference){.lvl-badge.rankup{animation:rankup 1.2s cubic-bezier(.2,1.6,.4,1)}@keyframes rankup{0%{transform:scale(.6) rotate(-20deg)}60%{transform:scale(1.18) rotate(4deg)}100%{transform:scale(1)}}}
+.lvl-badge{background:linear-gradient(150deg,var(--tier2,#c99bd8),var(--tier,#a970b9))!important}
+.lvl-badge b{color:var(--tier,#000)}
+.lvl-badge small{color:var(--tier,#8a4f9d)!important}
+#rankBox{border-color:color-mix(in srgb,var(--tier,#a970b9) 40%,var(--line))}
+.rank-league{font:700 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--tier,#8a4f9d)}
+.rank-streak{font:600 13px var(--body);color:var(--ink)}
+#rankBox .xpbar i{background:linear-gradient(90deg,var(--tier2,#c99bd8),var(--tier,#a970b9))}
+@media (prefers-reduced-motion:no-preference){#rankBox.diamond .lvl-badge{animation:diaglow 2.4s ease-in-out infinite}@keyframes diaglow{0%,100%{filter:drop-shadow(0 0 0 rgba(122,167,255,0))}50%{filter:drop-shadow(0 0 10px rgba(160,140,255,.8))}}}
+.badges{display:flex;flex-wrap:wrap;gap:6px}
+.badge{font:600 12px var(--body);padding:5px 10px;border-radius:99px;border:1px dashed var(--line);color:var(--muted)}
+.badge.got{border:1px solid #66926d;background:var(--ok-soft);color:var(--ok)}
+.space{height:min(80vh,780px)!important}
+.space .tree{display:none}
+.mix-title{position:absolute;left:14px;top:12px;display:flex;align-items:center;gap:8px;pointer-events:none}
+.mix-tape{font:400 13px Righteous,"Segoe UI",sans-serif;letter-spacing:.12em;color:#1a0b2e;background:linear-gradient(90deg,#ff9a3c,#ff4f9a 50%,#5ef2e6);padding:5px 10px;border-radius:4px;box-shadow:0 0 0 2px #1a0b2e inset,0 0 18px rgba(255,79,154,.45)}
+.mix-name{font:400 16px Righteous,"Segoe UI",sans-serif;color:#ffffff;text-shadow:0 0 12px rgba(255,154,60,.6)}
+.arrival{position:absolute;left:50%;top:22%;transform:translateX(-50%);text-align:center;pointer-events:none;display:flex;flex-direction:column;gap:4px;padding:14px 26px;border:2px solid var(--tierc,#ff9a3c);border-radius:12px;background:rgba(10,4,24,.72);box-shadow:0 0 40px var(--tierc,#ff9a3c)}
+.arrival small{font:600 12px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--tierc,#ff9a3c)}
+.arrival b{font:400 clamp(22px,5vw,36px) Righteous,"Segoe UI",sans-serif;color:#ffffff}
+@media (prefers-reduced-motion:no-preference){.arrival.show{animation:arr 4.2s ease forwards}@keyframes arr{0%{opacity:0;transform:translateX(-50%) scale(.6)}10%{opacity:1;transform:translateX(-50%) scale(1.08)}18%{transform:translateX(-50%) scale(1)}85%{opacity:1}100%{opacity:0}}}
+.planet-card{position:absolute;left:12px;bottom:12px;max-width:min(320px,calc(100% - 140px));background:rgba(10,4,24,.82);border:1px solid var(--tierc,#ff9a3c);border-radius:12px;padding:12px 14px;color:#ffffff;display:flex;flex-direction:column;gap:4px}
+.planet-card small{font:600 11px var(--mono);letter-spacing:.08em;color:var(--tierc,#ff9a3c)}
+.planet-card b{font:400 20px Righteous,"Segoe UI",sans-serif}
+.planet-card p{margin:0;font-size:14px;color:rgba(255,255,255,.8)}
+.pc-x{position:absolute;right:6px;top:4px;background:none;border:0;color:#ffffff;font-size:20px;padding:2px 8px}
+.quest-list{display:flex;flex-wrap:wrap;gap:8px}
+.quest{display:flex;align-items:center;gap:8px;border-radius:99px;padding:6px 14px 6px 6px}
+.quest .q-dot{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:var(--sunk);color:var(--muted)}
+.quest.done .q-dot{background:#66926d;color:#ffffff}
+.quest.ready .q-dot{background:var(--accent-soft);color:var(--accent)}
+.quest.sel{border-color:var(--ink)}
+.quest.add{border-style:dashed}
+#active .task{border:2px solid var(--brand);box-shadow:0 6px 22px rgba(169,112,185,.18),0 0 0 4px rgba(169,112,185,.08)}
+#active .task.mine{border-color:#1f78b4;box-shadow:0 6px 22px rgba(31,120,180,.22),0 0 0 4px rgba(31,120,180,.1)}
+.flags{display:flex;gap:6px;flex-wrap:wrap;padding:12px 18px 0}
+.flag{font:700 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:6px 10px;border-radius:6px}
+.flag.me{background:#1f78b4;color:#ffffff}
+.flag.new{background:var(--brand);color:#000000}
+@media (prefers-reduced-motion:no-preference){#active .task.mine .flag.me{animation:flagp 2s ease-in-out infinite}@keyframes flagp{0%,100%{box-shadow:0 0 0 0 rgba(31,120,180,.5)}50%{box-shadow:0 0 0 6px rgba(31,120,180,0)}}}
+.folders{display:flex;gap:8px;flex-wrap:wrap}
+.folders button{display:flex;align-items:center;gap:8px;border-radius:12px;padding:10px 16px;font:700 15px var(--body)}
+.folders button span{font:700 12px var(--mono);background:var(--sunk);color:var(--muted);border-radius:99px;padding:3px 8px}
+.folders button[aria-pressed="true"]{background:var(--ink);color:#ffffff;border-color:var(--ink)}
+.folders button[aria-pressed="true"] span{background:#ffffff;color:#000000}
+#done .task{border:1px solid var(--line)}
+.tabs{flex-wrap:wrap}
+.tab-badge{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;margin-left:4px;border-radius:99px;background:#1f78b4;color:#ffffff;font:700 11px var(--mono)}
+.inbox-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.inbox-item{display:flex;gap:12px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface)}
+.inbox-item.unread{border:2px solid #1f78b4;background:#f3f8fc}
+.ib-dot{width:10px;height:10px;border-radius:50%;margin-top:6px;flex:none;background:var(--line)}
+.inbox-item.unread .ib-dot{background:#1f78b4}
+.inbox-item.sub .ib-dot,.inbox-item.done .ib-dot{box-shadow:0 0 0 3px rgba(102,146,109,.25)}
+.ib-body{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.ib-line{overflow-wrap:anywhere}
+.ib-task{font-weight:700}
+.ib-text{color:var(--muted);font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--sunk);border-radius:8px;padding:8px 10px}
+.ib-link{color:var(--accent);font-size:13px;overflow-wrap:anywhere}
+.ib-body small{color:var(--muted);font:600 11px var(--mono)}
+#active .task.late{border-color:#c62828;box-shadow:0 6px 22px rgba(198,40,40,.22),0 0 0 4px rgba(198,40,40,.1)}
+.flag.late{background:#c62828;color:#ffffff}
+@media (prefers-reduced-motion:no-preference){#active .task.late .flag.late{animation:flagl 1.6s ease-in-out infinite}@keyframes flagl{0%,100%{box-shadow:0 0 0 0 rgba(198,40,40,.55)}50%{box-shadow:0 0 0 6px rgba(198,40,40,0)}}}
+.task-del{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 18px 12px;border-top:1px solid var(--line)}
+.task-del.confirm{justify-content:space-between;background:var(--bad-soft)}
+.task-del.confirm span{font-weight:600;color:var(--bad)}
+.join-code{margin:0;font-size:15px}.join-code b{font:700 18px var(--mono);letter-spacing:.12em;background:var(--accent-soft);padding:2px 8px;border-radius:6px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:50%;display:inline-block}
+.panel{border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+.panel h3{font:700 18px/1.2 var(--display);margin:0}
+.panel p{margin:0;color:var(--muted);max-width:65ch}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <span class="eyebrow">Tým Autaci</span>
+      <h1>Úkoly</h1>
+    </div>
+    <div class="who" id="who"><span>Kdo jsi?</span></div>
+  </header>
+
+  <nav class="tabs" aria-label="Stránky">
+    <a href="#ukoly" id="tab-ukoly">Úkoly</a>
+    <a href="#cesta" id="tab-cesta">Cesta</a>
+    <a href="#tym" id="tab-tym">Tým</a>
+    <a href="#schranka" id="tab-schranka" hidden>Schránka <span id="inbox-n" class="tab-badge" hidden>0</span></a>
+    <a href="#sprava" id="tab-sprava" hidden>Role</a>
+  </nav>
+
+  <div class="notice" id="status">Načítám úkoly…</div>
+
+  <section class="new" id="join" hidden>
+    <h2>Připoj se k týmu Autaci</h2>
+    <form id="joinForm" class="form">
+      <label class="lbl" for="join-name">Tvoje jméno
+        <input type="text" id="join-name" maxlength="24" placeholder="Jak ti máme říkat" required>
+      </label>
+      <label class="lbl" for="join-code" id="join-code-wrap">Kód týmu (dostaneš od ownera)
+        <input type="text" id="join-code" maxlength="12" placeholder="Např. K7M2QX" autocomplete="off" style="text-transform:uppercase">
+      </label>
+      <div class="btns"><button type="submit" class="primary" id="join-submit">Uložit jméno</button></div>
+    </form>
+  </section>
+
+  <div class="view" id="view-ukoly">
+  <section class="summary" id="summary" hidden></section>
+
+  <section class="new" id="newTask" hidden>
+    <h2>Nový úkol</h2>
+    <form id="newForm" class="form">
+      <label class="lbl" for="nt-title">Co je potřeba udělat
+        <input type="text" id="nt-title" maxlength="140" placeholder="Např. Najít 7 firem v okolí se slabým webem" required>
+      </label>
+      <label class="lbl" for="nt-detail">Podrobnosti a co odevzdat
+        <textarea id="nt-detail" placeholder="Co přesně mají udělat, případně co chceš vidět v odevzdání"></textarea>
+      </label>
+      <div class="grid2">
+        <div class="assign" id="nt-assign"></div>
+        <label class="lbl" for="nt-due">Termín
+          <input type="date" id="nt-due" required>
+        </label>
+      </div>
+      <div class="lbl">Kdo úkol uvidí</div>
+      <div class="assign" id="nt-vis"></div>
+      <label class="lbl" for="nt-weight">Obtížnost<select id="nt-weight"><option value="rychla">Rychlovka · 10 b</option><option value="standard" selected>Standard · 25 b</option><option value="narocny">Náročný · 50 b</option><option value="boss">Boss · 100 b</option></select></label>
+      <label class="toggle" for="nt-journey"><input type="checkbox" id="nt-journey" checked> Po splnění zapsat do Cesty</label>
+      <label class="toggle" for="nt-needs"><input type="checkbox" id="nt-needs"> Musí se něco odevzdat (jinak stačí odškrtnout)</label>
+      <div class="btns"><button type="submit" class="primary" id="nt-submit">Zadat úkol</button></div>
+    </form>
+  </section>
+
+  <nav class="folders" aria-label="Složky úkolů">
+    <button type="button" id="f-active" aria-pressed="true">Aktivní úkoly <span id="f-active-n">0</span></button>
+    <button type="button" id="f-done" aria-pressed="false">Splněné úkoly <span id="f-done-n">0</span></button>
+  </nav>
+  <section class="list" id="active"></section>
+
+  <section class="list" id="done" hidden></section>
+  </div>
+
+  <div class="view" id="view-tym" hidden><section class="team" id="team"></section></div>
+  <div class="view" id="view-schranka" hidden><section class="team" id="inbox"></section></div>
+  <div class="view" id="view-sprava" hidden><section class="team" id="admin"></section></div>
+
+  <div class="view" id="view-cesta" hidden>
+    <section class="lvl" id="rankBox" hidden>
+      <div class="lvl-badge"><small id="rank-tier">Měď</small><b id="lvl-num">1</b></div>
+      <div class="lvl-info">
+        <div class="rank-league" id="rank-league">Měděná liga</div>
+        <h2 id="rank-name">Noobové</h2>
+        <div class="xpbar"><i id="rank-bar" style="width:0%"></i></div>
+        <div class="xp-meta"><span id="rank-pts">0 bodů</span><span id="rank-next"></span></div>
+        <div class="rank-streak" id="rank-streak"></div>
+        <ul class="rank-log" id="rank-log"></ul>
+        <details class="roles-help"><summary>Jak se počítají body</summary>
+          <dl class="roles-legend"><dt>Rychlovka</dt><dd>10 b · drobnost, stačí odškrtnout</dd><dt>Standard</dt><dd>25 b · běžný úkol</dd><dt>Náročný</dt><dd>50 b · větší práce na víc dní</dd><dt>Boss</dt><dd>100 b · velká věc pro celý tým</dd><dt>Dokončení</dt><dd>když úkol splní všichni, komu byl zadaný: úkol pro všechny +50 %, pro 2 lidi +30 %, pro 1 člověka +10 % (pro 3 a víc vybraných +40 %)</dd><dt>Cíl</dt><dd>250 b za každý splněný cíl na mapě</dd></dl>
+          <p>Každá liga má 30 levelů. Během ligy se barva mění: Měď (1–5), Bronz (6–10), Stříbro (11–15), Zlato (16–20), Platina (21–25), Diamant (26–30). Každá liga je jeden díl výpravy: Vol. 1 → Vol. 2 → Vol. 3. Každých 5 levelů doletíte na novou planetu, na levelu 30 na cílovou planetu dílu. Každý level potřebuje o 10 bodů víc než předchozí (50, 60, 70…).</p><p>Týdenní série: kolik týdnů po sobě tým splnil aspoň jeden úkol.</p>
+        </details>
+      </div>
+    </section>
+    <div class="legend"><span><i style="background:var(--green)"></i>Splněno</span><span><i style="border:2px solid var(--brand)"></i>Můžete odemknout</span><span><i style="border:2px dashed var(--line);background:var(--sunk)"></i>Zamčeno</span></div>
+    <div class="space" id="space">
+      <canvas id="nebula" aria-hidden="true"></canvas>
+      <canvas id="stars" aria-hidden="true"></canvas>
+      <div class="tree" id="tree"></div>
+      <div class="mix-title"><span class="mix-tape">AWESOME MIX</span><span class="mix-name">Cesta Autaci</span></div>
+      <div class="arrival" id="arrival" hidden></div>
+      <div class="planet-card" id="planetCard" hidden></div>
+      <div class="space-ctl"><button type="button" id="cam-in" aria-label="Přiblížit">+</button><button type="button" id="cam-out" aria-label="Oddálit">−</button><button type="button" id="cam-home">Na střed</button></div>
+    </div>
+    <section class="panel" id="quests"></section>
+    <section class="panel" id="journal"></section>
+    <section class="panel" id="panel"><h3>Mapa je zatím prázdná</h3><p>Cíle se tu objeví, až je owner přidá.</p></section>
+  </div>
+</div>
+<button type="button" id="logout" onclick="__signOut()">Odhlásit se</button>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const state = {requests:{}, membersRaw:{}, tasks:[], subs:{}, reviews:{}, members:{}, myDoc:null, uid:null, owner:false, db:null, loaded:{tasks:false,subs:false,reviews:false}, readOnly:false};
+
+const $ = id => document.getElementById(id);
+function el(tag, attrs, ...kids){
+  const n = document.createElement(tag);
+  if (attrs) for (const [k,v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of kids.flat()) if (c != null) n.append(c.nodeType ? c : document.createTextNode(c));
+  return n;
+}
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2200); }
+const key = (taskId, uid) => taskId + "__" + uid;
+const nameOf = uid => (state.members[uid] && state.members[uid].name) || "Neznámý člen";
+const norm = s => s.trim().toLocaleLowerCase("cs");
+
+function daysLeft(iso){ const [y,m,d]=iso.split("-").map(Number); const due=new Date(y,m-1,d); const t=new Date(); t.setHours(0,0,0,0); return Math.round((due-t)/86400000); }
+function fmtDate(iso){ const [y,m,d]=iso.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("cs-CZ",{weekday:"short",day:"numeric",month:"numeric"}); }
+function dueLabel(iso){
+  if (!iso) return {text:"bez termínu", cls:""};
+  const n = daysLeft(iso);
+  if (n < 0) return {text: fmtDate(iso)+" · po termínu", cls:"late"};
+  if (n === 0) return {text: "dnes", cls:"soon"};
+  if (n === 1) return {text: "zítra", cls:"soon"};
+  const w = n < 5 ? "dny" : "dní";
+  return {text: fmtDate(iso)+" · "+n+" "+w, cls: n <= 2 ? "soon" : ""};
+}
+
+function workers(){ return Object.keys(state.members).filter(uid => roleOf(uid) !== "host"); }
+function nameNode(uid){ const m = state.members[uid]; return [nameOf(uid), m && m.boss ? el("span", {class:"cap", text:"owner"}) : null]; }
+function canSee(t, uid){ return !Array.isArray(t.visibleTo) || t.visibleTo.includes(uid) || (state.members[uid] && state.members[uid].boss); }
+function visibleTasks(){ return state.tasks.filter(t => mgr() || canSee(t, state.uid)); }
+function assigneesOf(t){
+  if (t.assignees === "all") return workers().filter(uid => canSee(t, uid)).sort((a,b) => (state.members[a].joinedAt||0)-(state.members[b].joinedAt||0));
+  return Array.isArray(t.assignees) ? t.assignees.filter(uid => state.members[uid]) : [];
+}
+function personState(t, uid){
+  const s = state.subs[key(t.id, uid)];
+  if (t.needsSubmission === false) return s && s.done ? "ok" : "todo";
+  const r = state.reviews[key(t.id, uid)];
+  if (r && r.status === "ok") return "ok";
+  if (r && r.status === "redo" && (!s || (s.submittedAt||0) <= (r.reviewedAt||0))) return "redo";
+  if (s && s.text) return "ok";
+  return "todo";
+}
+const LABEL = {ok:"Odevzdáno", sent:"Odevzdáno, čeká na kontrolu", redo:"Vráceno k opravě", todo:"Čeká na odevzdání"};
+function taskDone(t){ const a = assigneesOf(t); return a.length > 0 && a.every(uid => personState(t, uid) === "ok"); }
+
+async function saveItem(taskId, item){
+  const items = Object.assign({}, (state.myDoc && state.myDoc.items) || {});
+  items[taskId] = item;
+  await state.db.doc("subs/"+state.uid).set(Object.assign({}, state.myDoc, {items}));
+}
+
+function renderWho(){
+  const w = $("who");
+  const me = state.myDoc && state.myDoc.name;
+  if (me) { w.replaceChildren(el("span", {text:"Přihlášený jako"}), el("span", {class:"chip", "aria-pressed":"true", text:me})); }
+  else w.replaceChildren();
+  const box = $("join");
+  const show = !!(state.db && state.uid && state.loaded.subs && !me && !state.readOnly);
+  box.hidden = !show;
+}
+
+function setupJoin(){
+  $("joinForm").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const name = $("join-name").value.trim().replace(/\s+/g, " ");
+    if (name.length < 2) { toast("Jméno musí mít aspoň 2 znaky"); return; }
+    const clash = Object.entries(state.members).some(([uid, m]) => uid !== state.uid && norm(m.name) === norm(name));
+    if (clash) { toast("Tohle jméno už někdo má, vyber jiné"); return; }
+    $("join-submit").disabled = true;
+    try {
+      const code = ($("join-code").value || "").trim().toUpperCase();
+      if (!state.owner && !code) { toast("Napiš kód týmu"); $("join-submit").disabled = false; return; }
+      await state.db.doc("subs/"+state.uid).set({name, boss: state.owner, joinedAt: Date.now(), items: {}, code});
+      toast("Vítej, " + name);
+      setTimeout(() => location.reload(), 700);
+    } catch(e){ if (e && e.code === "permission-denied") toast("Špatný kód týmu. Zeptej se ownera."); else handleWriteError(e); }
+    $("join-submit").disabled = false;
+  });
+}
+
+function renderSummary(){
+  const box = $("summary");
+  const people = workers();
+  const tasks = visibleTasks();
+  if (!tasks.length || !people.length) { box.hidden = true; return; }
+  box.hidden = false; box.replaceChildren();
+  for (const uid of people) {
+    const mine = tasks.filter(t => assigneesOf(t).includes(uid));
+    const ok = mine.filter(t => personState(t, uid) === "ok").length;
+    const pct = mine.length ? Math.round(ok/mine.length*100) : 0;
+    box.append(el("div", {class:"stat"},
+      el("small", null, nameNode(uid)),
+      el("b", {text: ok + " / " + mine.length}),
+      el("div", {class:"bar"}, el("i", {style:"width:"+pct+"%"})),
+      el("small", {text: mine.length ? "splněných úkolů" : "zatím bez úkolů"})
+    ));
+  }
+}
+
+function personBlock(t, uid){
+  const st = personState(t, uid);
+  const s = state.subs[key(t.id, uid)], r = state.reviews[key(t.id, uid)];
+  const isMe = uid === state.uid && state.db && !state.readOnly && !isHost(uid);
+  if (t.needsSubmission === false) {
+    const doneNow = st === "ok";
+    const row = el("div", {class:"person-row"},
+      el("div", {class:"name"}, el("span", {class:"tick "+(doneNow?"ok":""), "aria-hidden":"true", text: doneNow?"✓":""}), nameNode(uid)),
+      el("span", {class:"pill "+(doneNow?"ok":""), text: doneNow ? "Hotovo" : "Čeká"})
+    );
+    if (isMe) {
+      const btn = el("button", {type:"button", class: doneNow ? "" : "okb", text: doneNow ? "Zrušit fajfku" : "✓ Hotovo"});
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try { await saveItem(t.id, {done:!doneNow, submittedAt:Date.now()}); toast(doneNow ? "Fajfka zrušena" : "Hotovo ✓"); }
+        catch(e){ handleWriteError(e); btn.disabled = false; }
+      });
+      row.append(btn);
+    }
+    return el("div", {class:"person"}, row);
+  }
+  const block = el("div", {class:"person"},
+    el("div", {class:"person-row"},
+      el("div", {class:"name"}, el("span", {class:"tick "+(st==="todo"?"":st), "aria-hidden":"true", text: st==="ok"?"✓":st==="redo"?"!":st==="sent"?"•":""}), nameNode(uid)),
+      el("span", {class:"pill "+(st==="todo"?"":st), text:LABEL[st]})
+    )
+  );
+  if (s && s.text) block.append(el("div", {class:"sub"}, el("small", {text:"Odevzdání · "+new Date(s.submittedAt).toLocaleString("cs-CZ",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"})}), s.text));
+  if (r && r.note && st === "redo") block.append(el("div", {class:"note"+(r.status==="ok"?" ok":"")}, el("b", {text:"Hodnocení: "}), r.note));
+
+  if (isMe && st !== "ok") {
+    const id = "sub-"+t.id;
+    const ta = el("textarea", {id, placeholder: st==="redo" ? "Pošli opravenou verzi" : "Napiš sem, co jsi udělal (odkazy, seznam, poznámky)"});
+    if (s && s.text && st!=="redo") ta.value = s.text;
+    const btn = el("button", {type:"button", class:"primary", text: s && s.text ? "Odevzdat znovu" : "Odevzdat"});
+    btn.addEventListener("click", async () => {
+      const text = ta.value.trim();
+      if (!text) { toast("Napiš, co odevzdáváš"); ta.focus(); return; }
+      btn.disabled = true;
+      try { await saveItem(t.id, {text, submittedAt:Date.now()}); toast("Odevzdáno"); }
+      catch(e){ handleWriteError(e); btn.disabled = false; }
+    });
+    block.append(el("div", {class:"form"}, el("label", {class:"lbl", for:id, text:"Tvoje odevzdání"}), ta, el("div", {class:"btns"}, btn)));
+  }
+
+  if (mgr() && state.db && st === "ok" && s && s.text) {
+    const id = "note-"+t.id+"-"+uid;
+    const note = el("input", {type:"text", id, placeholder:"Co má opravit"});
+    const review = async status => {
+      if (status === "redo" && !note.value.trim()) { toast("Napiš, co má opravit"); note.focus(); return; }
+      try { await state.db.doc("reviews/"+key(t.id, uid)).set({taskId:t.id, member:uid, status, note:note.value.trim(), reviewedAt:Date.now()}); toast(status==="ok"?"Schváleno ✓":"Vráceno k opravě"); }
+      catch(e){ handleWriteError(e); }
+    };
+    block.append(el("div", {class:"form"}, el("label", {class:"lbl", for:id, text:"Vrátit k opravě? Napiš co opravit"}), note,
+      el("div", {class:"btns"}, el("button", {type:"button", class:"badb", onclick:()=>review("redo"), text:"Vrátit k opravě"}))));
+  }
+  return block;
+}
+
+function taskCard(t){
+  const done = taskDone(t);
+  const due = done ? {text:"hotovo", cls:"done"} : dueLabel(t.due);
+  const people = assigneesOf(t);
+  const isMineTodo = !done && state.uid && people.includes(state.uid) && personState(t, state.uid) !== "ok";
+  const isLate = !done && t.due && daysLeft(t.due) < 0;
+  return el("article", {class:"task" + (isLate ? " late" : isMineTodo ? " mine" : "")},
+    (() => {
+      const mineTodo = !done && state.uid && people.includes(state.uid) && personState(t, state.uid) !== "ok";
+      const fresh = !done && Date.now() - (t.createdAt || 0) < 3 * 86400000;
+      const late = !done && t.due && daysLeft(t.due) < 0;
+      return late || mineTodo || fresh ? el("div", {class:"flags"}, late ? el("span", {class:"flag late", text:"Po termínu"}) : null, mineTodo ? el("span", {class:"flag me", text:"Čeká na tebe"}) : null, fresh && !late ? el("span", {class:"flag new", text:"Nový úkol"}) : null) : null;
+    })(),
+    el("div", {class:"task-head"},
+      el("div", {class:"task-top"}, el("h3", {text:t.title||"Bez názvu"}), el("span", {class:"due "+due.cls, text:due.text})),
+      el("span", {class:"kind"+(t.needsSubmission===false?" tick-only":""), text: t.needsSubmission===false ? "Stačí odškrtnout" : "Povinné odevzdání"}),
+      state.owner ? el("span", {class:"kind tick-only", text: WEIGHTS[taskWeight(t)].name + " · " + WEIGHTS[taskWeight(t)].pts + " b"}) : null,
+      mgr() && Array.isArray(t.visibleTo) ? el("span", {class:"kind tick-only", text:"Vidí jen: " + t.visibleTo.map(nameOf).join(", ")}) : null,
+      t.detail ? el("p", {class:"detail", text:t.detail}) : null
+    ),
+    el("div", {class:"people"}, people.length ? people.map(uid => personBlock(t, uid)) : el("div", {class:"person"}, el("span", {class:"pill", text:"Zatím se nikdo nepřipojil"}))),
+    mgr() && state.db ? (state.delTask === t.id
+      ? el("div", {class:"task-del confirm"}, el("span", {text: done ? "Smazat úkol? Body za něj zmizí z ranku." : "Opravdu smazat úkol?"}),
+          el("div", {class:"btns"},
+            el("button", {type:"button", class:"badb", onclick: async () => { try { await state.db.doc("tasks/" + t.id).delete(); state.delTask = null; toast("Úkol smazán"); } catch(e){ handleWriteError(e); } }, text:"Ano, smazat"}),
+            el("button", {type:"button", onclick: () => { state.delTask = null; render(); }, text:"Zpět"})))
+      : el("div", {class:"task-del"}, el("button", {type:"button", class:"j-del", onclick: () => { state.delTask = t.id; render(); }, text:"Smazat úkol"})))
+    : null
+  );
+}
+
+function renderAssign(){
+  const box = $("nt-assign"); if (!box) return;
+  const prev = {}; box.querySelectorAll("input").forEach(i => prev[i.value] = i.checked);
+  box.replaceChildren();
+  const allId = "nt-a-all";
+  box.append(el("label", {for:allId}, el("input", {type:"checkbox", id:allId, value:"all", checked: prev.all !== undefined ? prev.all : true}), "Všichni"));
+  for (const uid of workers()) {
+    const id = "nt-a-"+uid;
+    box.append(el("label", {for:id}, el("input", {type:"checkbox", id, value:uid, checked: !!prev[uid]}), nameOf(uid)));
+  }
+}
+
+function renderVis(){
+  const box = $("nt-vis"); if (!box) return;
+  const prev = {}; box.querySelectorAll("input").forEach(i => prev[i.value] = i.checked);
+  box.replaceChildren();
+  box.append(el("label", {for:"nt-v-all"}, el("input", {type:"checkbox", id:"nt-v-all", value:"all", checked: prev.all !== undefined ? prev.all : true}), "Všichni"));
+  for (const uid of workers()) {
+    if (state.members[uid].boss) continue;
+    const id = "nt-v-"+uid;
+    box.append(el("label", {for:id}, el("input", {type:"checkbox", id, value:uid, checked: !!prev[uid]}), nameOf(uid)));
+  }
+}
+
+function render(){
+  renderWho();
+  const ready = state.loaded.tasks;
+  $("newTask").hidden = !(mgr() && state.db);
+  if (mgr() && state.db) { if (!state.formReady) { state.formReady = true; setupNewForm(); } renderAssign(); renderVis(); }
+  if (state.db && ready) {
+    const me = state.myDoc && state.myDoc.name;
+    $("status").hidden = !!me || !state.loaded.subs;
+    $("status").textContent = state.uid ? "Než začneš, napiš svoje jméno. Spojí se s tvým účtem a odevzdávat pak budeš jen za sebe." : "Nepodařilo se zjistit tvůj účet, takže můžeš úkoly jen číst.";
+  }
+  renderSummary();
+  const sorted = [...visibleTasks()].sort((a,b) => (a.due||"9999").localeCompare(b.due||"9999") || (a.createdAt||0)-(b.createdAt||0));
+  const active = sorted.filter(t => !taskDone(t)), done = sorted.filter(taskDone).reverse();
+  const act = $("active"); act.replaceChildren();
+  if (ready && !active.length) {
+    act.append(el("div", {class:"empty"}, el("b", {text: state.tasks.length ? "Všechno je hotové" : "Zatím žádné úkoly"}),
+      mgr() ? "Zadej nový úkol formulářem nahoře. Ostatní ho tu uvidí." : "Až bude zadaný nový úkol, objeví se tady i s termínem."));
+  }
+  active.forEach(t => act.append(taskCard(t)));
+  const showDone = state.folder === "done";
+  $("f-active-n").textContent = active.length; $("f-done-n").textContent = done.length;
+  $("f-active").setAttribute("aria-pressed", String(!showDone)); $("f-done").setAttribute("aria-pressed", String(showDone));
+  act.hidden = showDone;
+  const dn = $("done"); dn.hidden = !showDone; dn.replaceChildren();
+  if (showDone && !done.length) dn.append(el("div", {class:"empty"}, el("b", {text:"Zatím žádné splněné úkoly"}), "Jakmile úkol splní všichni, komu byl zadaný, přesune se sem."));
+  done.forEach(t => dn.append(taskCard(t)));
+  renderTree();
+  renderTeam();
+  renderAdmin();
+  renderInbox();
+  autoJourney();
+}
+
+function handleWriteError(e){
+  if (e && (e.code === "invalid_argument" || e.code === "permission-denied")) { state.readOnly = true; toast("Na tohle nemáš oprávnění."); render(); }
+  else if (e && e.code === "quota_exceeded") toast("Úložiště je plné, smažte staré úkoly.");
+  else toast("Nepovedlo se uložit, zkus to znovu.");
+}
+
+function setupNewForm(){
+  const d = new Date(); d.setDate(d.getDate() + ((7 - d.getDay()) % 7 || 7));
+  $("nt-due").value = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  $("newForm").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const title = $("nt-title").value.trim(), detail = $("nt-detail").value.trim(), due = $("nt-due").value;
+    const all = $("nt-a-all").checked;
+    const picked = [...$("nt-assign").querySelectorAll("input")].filter(i => i.checked && i.value !== "all").map(i => i.value);
+    const assignees = all ? "all" : picked;
+    const needsSubmission = $("nt-needs").checked;
+    const visAll = $("nt-v-all").checked;
+    const visPicked = [...$("nt-vis").querySelectorAll("input")].filter(i => i.checked && i.value !== "all").map(i => i.value);
+    const visibleTo = visAll ? "all" : visPicked;
+    if (!visAll && !visPicked.length) { toast("Vyber, kdo úkol uvidí"); return; }
+    if (!title) { toast("Napiš, co je potřeba udělat"); return; }
+    if (!all && !picked.length) { toast("Vyber, pro koho úkol je"); return; }
+    $("nt-submit").disabled = true;
+    try { await state.db.collection("tasks").add({title, detail, due, assignees, needsSubmission, visibleTo, weight: $("nt-weight").value, toJourney: $("nt-journey").checked, createdAt:Date.now()}); $("nt-journey").checked=true; $("nt-title").value=""; $("nt-needs").checked=false; $("nt-detail").value=""; toast("Úkol zadán"); }
+    catch(e){ handleWriteError(e); }
+    $("nt-submit").disabled = false;
+  });
+}
+
+
+// ---- Cesta (skill tree) ----
+const ROOT_ID = "root";
+state.tree = {}; state.nodes = []; state.treeLoaded = false; state.selNode = null; state.confirmNode = false;
+function nodeById(id){ return id === ROOT_ID ? {id:ROOT_ID, title:"Autaci", desc:"Tady jste vy. Z tohohle bodu vedou všechny vaše cesty.", parent:null} : state.nodes.find(n => n.id === id); }
+function childrenOf(id){ return state.nodes.filter(n => n.parent === id); }
+function nodeState(n){ if (n.id === ROOT_ID || state.tree[n.id]) return "done"; return (n.parent === ROOT_ID || state.tree[n.parent]) ? "ready" : "locked"; }
+
+function xpFor(uid){
+  let xp = 0;
+  for (const t of state.tasks) if (assigneesOf(t).includes(uid) && personState(t, uid) === "ok") xp += 20;
+  return xp;
+}
+// ---- Bodový systém a ranky (počítá se automaticky) ----
+const WEIGHTS = {
+  rychla:   {name:"Rychlovka", pts:10,  desc:"Drobnost na pár minut, stačí odškrtnout."},
+  standard: {name:"Standard",  pts:25,  desc:"Běžný úkol na hodinu dvě."},
+  narocny:  {name:"Náročný",   pts:50,  desc:"Větší práce na víc dní."},
+  boss:     {name:"Boss",      pts:100, desc:"Velká věc, která posune celý tým."}
+};
+const BONUS = {vcas:0.2, tym:0.5, cil:250};
+const LEVEL_NAMES = ["Noobové","Tutoriál dokončen","Hobiti na cestě","Padawani","Respawnutí","Lovci questů","Družina prstenu","Jedi učni","Level Up Squad","Zaklínači z okresu","Avengers ze sídliště","Speedrunneři","Rytíři kulatého stolu","Strážci galaxie","Jedi mistři","Mandaloriáni","Boss Fight Ready","Hackeři Matrixu","Vyvolení","Iron Mani","Gandalfové Bílí","Legendy z Valhally","Krotitelé draků","Final Boss","Thanos s rukavicí","Bohové Olympu","Páni multiverza","Do nekonečna a ještě dál","Tvůrci reality","Vesmírní šéfové"];
+const LEAGUES = ["Měděná","Ocelová","Kosmická","Hvězdná","Galaktická","Nekonečná"];
+const TIERS = [
+  {name:"Měď",     c:"#b87333", c2:"#e0a070"},
+  {name:"Bronz",   c:"#8c6239", c2:"#c9955c"},
+  {name:"Stříbro", c:"#8f99a8", c2:"#dfe5ee"},
+  {name:"Zlato",   c:"#c9a227", c2:"#f6dc78"},
+  {name:"Platina", c:"#5fa9a8", c2:"#bfeeed"},
+  {name:"Diamant", c:"#7aa7ff", c2:"#e6d4ff"}
+];
+function rankGap(N){ return 50 + 10 * (N - 1); }
+function rankAt(total){
+  let N = 1, from = 0;
+  while (total >= from + rankGap(N)) { from += rankGap(N); N++; }
+  const league = Math.floor((N - 1) / 30), lvl = (N - 1) % 30 + 1, tier = Math.floor((lvl - 1) / 5);
+  const leagueName = "Vol. " + (league + 1) + (league > 2 ? " · ???" : "");
+  return {n: lvl, N, league, leagueName, tier, tierInfo: TIERS[tier], name: LEVEL_NAMES[lvl - 1], from, to: from + rankGap(N)};
+}
+// ---- Motivace: týdenní série a odznaky ----
+function weekKey(ts){ const d = new Date(ts); d.setHours(0,0,0,0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); }
+function teamStreak(){
+  const weeks = new Set();
+  for (const t of state.tasks) for (const uid of assigneesOf(t)) if (personState(t, uid) === "ok") { const s = state.subs[key(t.id, uid)]; if (s && s.submittedAt) weeks.add(weekKey(s.submittedAt)); }
+  const W = 7 * 86400000; let cur = weekKey(Date.now());
+  if (!weeks.has(cur)) cur -= W;
+  let n = 0; while (weeks.has(cur)) { n++; cur -= W; }
+  return {n, thisWeek: weeks.has(weekKey(Date.now()))};
+}
+const BADGES = [
+  {id:"prvni", name:"První krok", desc:"Splň první úkol", test: m => m.done >= 1},
+  {id:"pet", name:"Rozjetý", desc:"Splň 5 úkolů", test: m => m.done >= 5},
+  {id:"patnact", name:"Mašina", desc:"Splň 15 úkolů", test: m => m.done >= 15},
+  {id:"tricet", name:"Nezastavitelný", desc:"Splň 30 úkolů", test: m => m.done >= 30},
+  {id:"boss", name:"Boss poražen", desc:"Splň úkol s obtížností Boss", test: m => m.boss >= 1},
+  {id:"tym", name:"Týmový hráč", desc:"Dokončete spolu 3 úkoly pro všechny", test: m => m.team >= 3},
+  {id:"umelec", name:"Umělec", desc:"Měj 3 práce v portfoliu", test: m => m.works >= 3}
+];
+function memberBadges(uid){
+  let done = 0, boss = 0, team = 0;
+  for (const t of state.tasks) {
+    if (!assigneesOf(t).includes(uid) || personState(t, uid) !== "ok") continue;
+    done++; if (taskWeight(t) === "boss") boss++;
+    if (t.assignees === "all" && taskDone(t)) team++;
+  }
+  const raw = state.membersRaw[uid] || {}, works = Array.isArray(raw.works) ? raw.works.length : 0;
+  const m = {done, boss, team, works};
+  return BADGES.map(b => ({...b, got: b.test(m)}));
+}
+function badgeRow(uid){
+  const list = memberBadges(uid), got = list.filter(b => b.got), next = list.find(b => !b.got);
+  const row = el("div", {class:"badges"});
+  for (const b of got) row.append(el("span", {class:"badge got", title: b.desc, text: "★ " + b.name}));
+  if (next) row.append(el("span", {class:"badge", title: next.desc, text: "Další: " + next.desc}));
+  return el("section", {class:"m-sec"}, el("h4", {text:"Odznaky " + got.length + "/" + list.length}), row);
+}
+function taskWeight(t){ return WEIGHTS[t.weight] ? t.weight : (t.needsSubmission === false ? "rychla" : "standard"); }
+function isoOf(ts){ const d = new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function computeScore(){
+  let total = 0; const log = [];
+  for (const t of state.tasks) {
+    const w = WEIGHTS[taskWeight(t)].pts, people = assigneesOf(t);
+    let all = people.length > 0, last = 0;
+    for (const uid of people) {
+      if (personState(t, uid) !== "ok") { all = false; continue; }
+      const s = state.subs[key(t.id, uid)] || {}, at = s.submittedAt || 0;
+      const p = w;
+      total += p; last = Math.max(last, at);
+      log.push({at, text: nameOf(uid) + " · " + (t.title || "Úkol"), pts: p, tag: ""});
+    }
+    if (all) {
+      const pct = t.assignees === "all" ? 0.5 : people.length === 1 ? 0.1 : people.length === 2 ? 0.3 : 0.4;
+      const p = Math.round(w * pct); total += p;
+      log.push({at: last, text: (t.assignees === "all" ? "Celý tým splnil · " : "Bonus za dokončení · ") + (t.title || "Úkol"), pts: p, tag: "+" + Math.round(pct * 100) + " %"});
+    }
+  }
+  for (const n of state.nodes) if (state.tree[n.id]) { total += BONUS.cil; log.push({at: state.tree[n.id], text: "Cíl splněn · " + n.title, pts: BONUS.cil, tag: "cíl"}); }
+  log.sort((a, b) => b.at - a.at);
+  return {total, log, rank: rankAt(total)};
+}
+function currentRank(){ return computeScore().rank; }
+
+function renderLevel(){
+  const box = $("rankBox"); if (!box) return;
+  box.hidden = !(state.db && (state.owner || state.showRank));
+  if (box.hidden) return;
+  const sc = computeScore(), r = sc.rank;
+  $("lvl-num").textContent = r.n;
+  $("rank-name").textContent = r.name;
+  $("rank-tier").textContent = r.tierInfo.name;
+  $("rank-league").textContent = r.leagueName + " · Level " + r.n + "/30";
+  box.style.setProperty("--tier", r.tierInfo.c); box.style.setProperty("--tier2", r.tierInfo.c2);
+  box.classList.toggle("diamond", r.tier === 5);
+  const st = teamStreak();
+  $("rank-streak").textContent = st.n ? "Série: " + st.n + (st.n === 1 ? " týden" : st.n < 5 ? " týdny" : " týdnů") + " po sobě" + (st.thisWeek ? "" : " · tento týden ještě nic, udržte ji!") : "Série: zatím žádná. Splňte úkol a začněte ji.";
+  $("rank-pts").textContent = sc.total + " bodů";
+  $("rank-next").textContent = (r.n === 30 ? "do další ligy" : "do levelu " + (r.n + 1)) + " zbývá " + (r.to - sc.total) + " b";
+  $("rank-bar").style.width = Math.round((sc.total - r.from) / (r.to - r.from) * 100) + "%";
+  const ul = $("rank-log"); ul.replaceChildren();
+  if (!sc.log.length) ul.append(el("li", {class:"m-empty", text:"Body přibudou s prvním splněným úkolem."}));
+  for (const e of sc.log.slice(0, 6)) ul.append(el("li", null, el("span", {class:"rl-pts", text:"+" + e.pts}), el("span", {class:"rl-text", text:e.text}), e.tag ? el("span", {class:"pill ok", text:e.tag}) : null));
+  if (state.treeLoaded && state.loaded.tasks && state.loaded.subs) {
+    if (state.prevRankN && r.N > state.prevRankN) {
+      toast(r.n === 1 ? "NOVÁ LIGA! " + r.leagueName : "LEVEL UP! " + r.n + " · " + r.name);
+      const b = box.querySelector(".lvl-badge"); if (b) { b.classList.remove("rankup"); void b.offsetWidth; b.classList.add("rankup"); }
+    }
+    state.prevRankN = r.N;
+  }
+}
+
+function layout(){
+  const pos = {[ROOT_ID]: {x:0, y:0, depth:0}};
+  const leaves = id => { const k = childrenOf(id); return k.length ? k.reduce((s, c) => s + leaves(c.id), 0) : 1; };
+  const place = (id, a0, a1, depth) => {
+    const kids = childrenOf(id); const total = kids.reduce((s, c) => s + leaves(c.id), 0) || 1;
+    let a = a0;
+    for (const c of kids) {
+      const span = (a1 - a0) * leaves(c.id) / total, mid = a + span / 2;
+      const r = r0() + depth * 140;
+      pos[c.id] = {x: Math.round(r * Math.cos(mid)), y: Math.round(r * Math.sin(mid)), depth: depth + 1};
+      place(c.id, a, a + span, depth + 1);
+      a += span;
+    }
+  };
+  place(ROOT_ID, -Math.PI, Math.PI, 0);
+  return pos;
+}
+
+function renderTree(){
+  const NS = "http://www.w3.org/2000/svg";
+  const s = (tag, attrs, ...kids) => { const n = document.createElementNS(NS, tag); for (const [k,v] of Object.entries(attrs||{})) if (v != null) n.setAttribute(k, v); for (const c of kids) if (c != null) n.append(c.nodeType ? c : document.createTextNode(c)); return n; };
+  const prev = state.treeLoaded ? state.prevTree : null;
+  const fresh = prev ? Object.keys(state.tree).filter(id => !prev[id]) : [];
+  if (state.treeLoaded) state.prevTree = Object.assign({}, state.tree);
+
+  const pos = layout();
+  const maxDepth = Math.max(0, ...Object.values(pos).map(p => p.depth));
+  const ext = 320 + Math.max(0, maxDepth - 1) * 140 + 200;
+  const pts = Object.values(pos);
+  const minX = Math.min(...pts.map(p => p.x)) - 260, maxX = Math.max(...pts.map(p => p.x)) + 260;
+  const minY = Math.min(...pts.map(p => p.y)) - 150, maxY = Math.max(...pts.map(p => p.y)) + 150;
+  const svg = s("svg", {width:"100%", height:"100%", role:"img", "aria-label":"Mapa cesty týmu Autaci"}); const cam = s("g", {id:"cam"}); state.bbox = {x:minX, y:minY, w:maxX-minX, h:maxY-minY};
+  svg.append(s("defs", null,
+    s("filter", {id:"glow", filterUnits:"userSpaceOnUse", x:"-2000", y:"-2000", width:"4000", height:"4000"}, s("feGaussianBlur", {stdDeviation:"7", result:"b"}), s("feMerge", null, s("feMergeNode", {in:"b"}), s("feMergeNode", {in:"SourceGraphic"}))),
+    s("radialGradient", {id:"core"}, s("stop", {offset:"0%", "stop-color":"#c99bd8"}), s("stop", {offset:"70%", "stop-color":"#a970b9"}), s("stop", {offset:"100%", "stop-color":"#6d3f7c"})),
+    s("radialGradient", {id:"haze"}, s("stop", {offset:"0%", "stop-color":"#a970b9", "stop-opacity":"0.28"}), s("stop", {offset:"100%", "stop-color":"#a970b9", "stop-opacity":"0"}))
+  ));
+  for (let d = 0; d < maxDepth; d++) cam.append(s("circle", {r: r0() + d * 140, fill:"none", stroke:"#ffffff", "stroke-opacity":"0.06", "stroke-dasharray":"2 10"}));
+
+  const paths = s("g"), nodes = s("g");
+  svg.append(cam); cam.append(paths, nodes);
+  for (const n of state.nodes) {
+    const a = pos[n.parent], b = pos[n.id]; if (!a || !b) continue;
+    const st = nodeState(n), lit = st === "done", open = st === "ready";
+    paths.append(s("line", {x1:a.x, y1:a.y, x2:b.x, y2:b.y,
+      stroke: lit ? "#66926d" : open ? "#a970b9" : "#3a3540", "stroke-width": lit ? 6 : 3, "stroke-linecap":"round",
+      "stroke-dasharray": lit || open ? null : "4 9", filter: lit ? "url(#glow)" : null, class: open ? "path-open" : null}));
+  }
+  // events on the main line
+  const goal = childrenOf(ROOT_ID)[0];
+  if (goal && pos[goal.id] && state.events.length) {
+    const A = pos[ROOT_ID], B = pos[goal.id];
+    const dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+    const start = 175, end = L - 125, N = state.events.length;
+    const pts = state.events.map((e, i) => { const d = start + (end - start) * (N === 1 ? 0.5 : i / (N - 1)); return {x: Math.round(A.x + ux * d), y: Math.round(A.y + uy * d), e, i}; });
+    const last = pts[N - 1];
+    paths.append(s("line", {x1:A.x, y1:A.y, x2:last.x, y2:last.y, stroke:"#66926d", "stroke-width":6, "stroke-linecap":"round", filter:"url(#glow)"}));
+    const trunc = (t, n) => t.length > n ? t.slice(0, n - 1) + "…" : t;
+    for (const p of pts) {
+      const up = p.i % 2 === 0 ? -1 : 1;
+      const g = s("g", {class:"evt"+(fresh.includes("ev:"+p.e.id)?" fresh":""), transform:`translate(${p.x} ${p.y})`});
+      g.append(s("circle", {r:11, class:"evt-dot", filter:"url(#glow)"}));
+      g.append(s("text", {y: up < 0 ? -26 : 40, class:"evt-d"}, fmtShort(p.e.date)));
+      g.append(s("text", {y: up < 0 ? -46 : 60, class:"evt-t"}, trunc(p.e.text, 24)));
+      nodes.append(g);
+    }
+  }
+  const lines = t => { const w = t.split(" "), out = [""]; for (const x of w) { if ((out[out.length-1] + " " + x).trim().length > 16 && out[out.length-1]) out.push(x); else out[out.length-1] = (out[out.length-1] + " " + x).trim(); } return out.slice(0, 3); };
+
+  for (const n of [nodeById(ROOT_ID), ...state.nodes]) {
+    const p = pos[n.id]; if (!p) continue;
+    const st = nodeState(n), isRoot = n.id === ROOT_ID;
+    const g = s("g", {class:"mnode "+st+(state.selNode===n.id?" sel":"")+(fresh.includes(n.id)?" fresh":""), transform:`translate(${p.x} ${p.y})`, tabindex:"0", role:"button",
+      "aria-label": isRoot ? "Autaci, střed mapy" : n.title + ", " + (st === "done" ? "splněno" : st === "ready" ? "můžete odemknout" : "zamčeno")});
+    if (isRoot) {
+      const R = 62;
+      g.append(s("circle", {r: R + 14, fill:"none", stroke:"#a970b9", "stroke-opacity":"0.5", "stroke-width":"2", class:"spin", "stroke-dasharray":"6 10"}));
+      g.append(s("circle", {r: R, fill:"url(#core)", filter:"url(#glow)", class:"core-orb"}));
+      const showR = state.owner || state.showRank;
+      g.append(s("text", {y: showR ? "-6" : "8", class:"core-t"}, "AUTACI"));
+      if (showR) { const cr = currentRank(); g.append(s("text", {y:"20", class:"core-l"}, cr.tierInfo.name.toUpperCase() + " · LVL " + cr.n)); }
+    } else {
+      const R = 30;
+      if (st === "ready") g.append(s("circle", {r: R + 10, class:"ring"}));
+      if (fresh.includes(n.id)) g.append(s("circle", {r: R, class:"burst"}));
+      g.append(s("circle", {r: R, class:"orb", filter: st === "done" ? "url(#glow)" : null}));
+      g.append(s("text", {y:"8", class:"glyph"}, st === "done" ? "✓" : st === "ready" ? "+" : "✕"));
+      const side = p.x < -5 ? -1 : 1, ls = lines(n.title);
+      ls.forEach((ln, i) => g.append(s("text", {x: side * (R + 14), y: 6 + (i - (ls.length - 1) / 2) * 18, class:"lbl", "text-anchor": side < 0 ? "end" : "start"}, ln)));
+    }
+    const pick = () => { state.selNode = n.id; state.confirmNode = false; renderTree(); };
+    g.addEventListener("click", pick);
+    g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    nodes.append(g);
+  }
+  $("tree").replaceChildren(svg);
+  setupSpace(); if (!state.camHomed) homeCam(); else applyCam();
+  renderLevel();
+  renderPanel();
+  renderJournal();
+}
+
+async function saveTree(nodes, done, msg){
+  try { await state.db.doc("tree/state").set({nodes, done, rank: state.rank || 1}); state.confirmNode = false; if (msg) toast(msg); }
+  catch(e){ handleWriteError(e); }
+}
+
+function renderPanel(){
+  const p = $("panel"); const n = state.selNode ? nodeById(state.selNode) : null;
+  const canEdit = mgr() && state.db;
+  if (!n) {
+    const empty = !state.nodes.length;
+    p.replaceChildren(el("h3", {text: empty ? "Mapa je zatím prázdná" : "Klikni na cíl"}),
+      el("p", {text: empty ? (canEdit ? "Klikni na AUTACI uprostřed a přidej první cíl. Z každého cíle pak můžeš pokračovat dalšími." : "Až owner přidá první cíle, objeví se tady.") : "U každého cíle uvidíš, co znamená a co je potřeba splnit, aby se odemkl."}));
+    return;
+  }
+  const st = nodeState(n), isRoot = n.id === ROOT_ID;
+  const kids = [];
+  if (!isRoot) kids.push(el("span", {class:"kind"+(st==="done"?"":" tick-only"), text: st === "done" ? "Splněno " + new Date(state.tree[n.id]).toLocaleDateString("cs-CZ") : st === "ready" ? "Můžete odemknout" : "Zamčeno"}));
+  kids.push(el("h3", {text:n.title}));
+  if (n.desc) kids.push(el("p", {text:n.desc}));
+  if (st === "locked") kids.push(el("p", {text:"Nejdřív splňte: " + (nodeById(n.parent) || {}).title}));
+  if (canEdit && !isRoot && st !== "locked") {
+    if (!state.confirmNode) kids.push(el("div", {class:"btns"}, el("button", {type:"button", class: st === "done" ? "" : "okb", onclick:()=>{ state.confirmNode = "toggle"; renderPanel(); }, text: st === "done" ? "Vrátit jako nesplněné" : "✓ Označit jako splněné"})));
+    else if (state.confirmNode === "toggle") kids.push(el("div", {class:"btns"},
+      el("button", {type:"button", class: st === "done" ? "badb" : "okb", onclick:()=>toggleNode(n.id), text: st === "done" ? "Ano, vrátit" : "Ano, splněno!"}),
+      el("button", {type:"button", onclick:()=>{ state.confirmNode = false; renderPanel(); }, text:"Zpět"})));
+  }
+  if (canEdit) {
+    const tid = "nn-title", did = "nn-desc";
+    kids.push(el("form", {class:"form", onsubmit: ev => {
+      ev.preventDefault();
+      const title = $(tid).value.trim(), desc = $(did).value.trim();
+      if (!title) { toast("Napiš název cíle"); return; }
+      const id = "n" + Date.now().toString(36);
+      saveTree([...state.nodes, {id, title: title.slice(0, 60), desc, parent: n.id}], state.tree, "Cíl přidán");
+    }},
+      el("label", {class:"lbl", for:tid}, isRoot ? "Nová cesta z Autaci" : "Navazující cíl", el("input", {type:"text", id:tid, maxlength:"60", placeholder:"Např. První zakázka"})),
+      el("label", {class:"lbl", for:did}, "Popis (nepovinný)", el("input", {type:"text", id:did, maxlength:"200", placeholder:"Co přesně musíme splnit"})),
+      el("div", {class:"btns"}, el("button", {type:"submit", class:"primary", text:"Přidat cíl"}))));
+    if (!isRoot && !childrenOf(n.id).length) {
+      if (state.confirmNode === "del") kids.push(el("div", {class:"btns"},
+        el("button", {type:"button", class:"badb", onclick:()=>{ const done = Object.assign({}, state.tree); delete done[n.id]; state.selNode = null; saveTree(state.nodes.filter(x => x.id !== n.id), done, "Cíl odebrán"); }, text:"Ano, odebrat cíl"}),
+        el("button", {type:"button", onclick:()=>{ state.confirmNode = false; renderPanel(); }, text:"Zpět"})));
+      else kids.push(el("div", {class:"btns"}, el("button", {type:"button", class:"badb", onclick:()=>{ state.confirmNode = "del"; renderPanel(); }, text:"Odebrat cíl"})));
+    }
+  }
+  p.replaceChildren(...kids);
+}
+async function toggleNode(id){
+  const done = Object.assign({}, state.tree);
+  if (done[id]) {
+    delete done[id];
+    const drop = pid => childrenOf(pid).forEach(c => { delete done[c.id]; drop(c.id); });
+    drop(id);
+  } else done[id] = Date.now();
+  await saveTree(state.nodes, done, done[id] ? "Odemčeno: " + nodeById(id).title : "Vráceno");
+}
+
+function r0(){ return Math.max(380, 300 + state.events.length * 170); }
+state.events = []; state.delEvent = null;
+function fmtShort(iso){ if (!iso) return ""; const [y,m,d] = iso.split("-").map(Number); return d + ". " + m + ". " + y; }
+function isoToday(){ const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function renderJournal(){
+  const box = $("journal"); if (!box) return;
+  const canEdit = mgr() && state.db;
+  const kids = [el("h3", {text:"Naše cesta"}), el("p", {text: state.events.length ? "Co všechno se stalo na cestě k cíli." : (canEdit ? "Zapiš první událost. Objeví se jako svítící bod na čáře k cíli." : "Zatím tu nejsou žádné zápisy.")})];
+  if (canEdit) {
+    if (!box.querySelector("#ev-text")) {
+      // build form once so typing is never lost on re-render
+    }
+    const form = el("form", {class:"form", id:"ev-form", onsubmit: async ev => {
+      ev.preventDefault();
+      const text = $("ev-text").value.trim(), date = $("ev-date").value || isoToday();
+      if (!text) { toast("Napiš, co se stalo"); return; }
+      $("ev-add").disabled = true;
+      try { await state.db.collection("events").add({text: text.slice(0, 200), date, createdAt: Date.now()}); $("ev-text").value = ""; toast("Zapsáno na cestu"); }
+      catch(e){ handleWriteError(e); }
+      $("ev-add").disabled = false;
+    }},
+      el("div", {class:"grid2"},
+        el("label", {class:"lbl", for:"ev-text"}, "Co se stalo", el("input", {type:"text", id:"ev-text", maxlength:"200", placeholder:"Např. Poslali jsme prvních 10 nabídek"})),
+        el("label", {class:"lbl", for:"ev-date"}, "Kdy", el("input", {type:"date", id:"ev-date"}))),
+      el("div", {class:"btns"}, el("button", {type:"submit", class:"primary", id:"ev-add", text:"Zapsat na cestu"})));
+    const old = $("ev-form");
+    if (old) { kids.push(old); } else { kids.push(form); }
+  }
+  const list = el("ol", {class:"journal-list"});
+  for (const e of [...state.events].reverse()) {
+    const li = el("li", null, el("span", {class:"j-date", text: fmtShort(e.date)}), el("span", {class:"j-text", text: e.text}));
+    if (canEdit) {
+      if (state.delEvent === e.id) li.append(el("span", {class:"btns"},
+        el("button", {type:"button", class:"badb", onclick: async () => { try { await state.db.doc("events/"+e.id).delete(); state.delEvent = null; toast("Zápis odebrán"); } catch(err){ handleWriteError(err); } }, text:"Ano, odebrat"}),
+        el("button", {type:"button", onclick: () => { state.delEvent = null; renderJournal(); }, text:"Zpět"})));
+      else li.append(el("button", {type:"button", class:"j-del", "aria-label":"Odebrat zápis", onclick: () => { state.delEvent = e.id; renderJournal(); }, text:"Odebrat"}));
+    }
+    list.append(li);
+  }
+  if (state.events.length) kids.push(list);
+  box.replaceChildren(...kids);
+  const d = $("ev-date"); if (d && !d.value) d.value = isoToday();
+}
+
+// ---- Tým / portfolio ----
+state.logged = {};
+function autoJourney(){
+  if (!mgr() || !state.db || !state.loaded.tasks || !state.loaded.subs || !state.loaded.events) return;
+  for (const t of state.tasks) {
+    if (t.toJourney === false || state.logged[t.id] || !taskDone(t)) continue;
+    if (state.events.some(e => e.taskId === t.id)) { state.logged[t.id] = true; continue; }
+    state.logged[t.id] = true;
+    const last = Math.max(...assigneesOf(t).map(uid => (state.subs[key(t.id, uid)] || {}).submittedAt || 0), Date.now() * 0) || Date.now();
+    const d = new Date(last), date = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    setTimeout(() => {
+      state.db.doc("events/task-"+t.id).set({text: t.title || "Splněný úkol", date, taskId: t.id, createdAt: Date.now()})
+        .then(() => toast("Zapsáno do Cesty: " + (t.title || "")))
+        .catch(() => { state.logged[t.id] = false; });
+    }, 0);
+  }
+}
+
+function memberStats(uid){
+  const mine = state.tasks.filter(t => assigneesOf(t).includes(uid));
+  let done = 0, waiting = 0, late = 0, redo = 0;
+  for (const t of mine) {
+    const st = personState(t, uid);
+    if (st === "ok") done++;
+    else { waiting++; if (st === "redo") redo++; if (t.due && daysLeft(t.due) < 0) late++; }
+  }
+  const items = Object.entries((state.membersRaw[uid] || {}).items || {}).map(([tid, it]) => ({tid, ...it})).filter(it => it.submittedAt && (it.text || it.done));
+  items.sort((a, b) => b.submittedAt - a.submittedAt);
+  const lastAt = items.length ? items[0].submittedAt : 0;
+  return {mine, done, waiting, late, redo, items, lastAt};
+}
+
+function ago(ts){
+  if (!ts) return "zatím nic";
+  const days = Math.floor((Date.now() - ts) / 86400000);
+  if (days <= 0) return "dnes";
+  if (days === 1) return "včera";
+  return "před " + days + (days < 5 ? " dny" : " dny");
+}
+
+function renderTeam(){
+  const box = $("team"); if (!box) return;
+  const people = workers().sort((a, b) => (state.members[a].joinedAt||0) - (state.members[b].joinedAt||0));
+  box.replaceChildren();
+  if (!people.length) { box.append(el("div", {class:"empty"}, el("b", {text:"Zatím se nikdo nepřipojil"}), "Až si členové na stránce napíšou jméno, objeví se tady jejich portfolio.")); return; }
+  for (const uid of people) {
+    const m = state.members[uid], st = memberStats(uid), raw = state.membersRaw[uid] || {};
+    const card = el("article", {class:"member"});
+    const worksCount = Array.isArray(raw.works) ? raw.works.length : 0;
+    card.append(el("div", {class:"m-head"},
+      el("div", {class:"m-name"}, el("h3", null, nameNode(uid))),
+      m.joinedAt > 1e12 ? el("span", {class:"pill", text: "V týmu od " + new Date(m.joinedAt).toLocaleDateString("cs-CZ")}) : null));
+    const hidden = !!raw.hidden, mineCard = uid === state.uid;
+    if (mineCard && state.db && !state.readOnly) card.append(el("div", {class:"btns m-vis"},
+      el("button", {type:"button", onclick:()=>saveMyDoc({hidden:!hidden}, hidden ? "Portfolio je zase vidět" : "Portfolio je skryté"), text: hidden ? "Zobrazit moje portfolio ostatním" : "Skrýt moje portfolio"}),
+      el("span", {class:"m-empty", text: hidden ? "Ostatní teď vidí jen tvoje jméno." : "Portfolio teď vidí celý tým."})));
+    if (hidden && !mineCard) {
+      card.append(el("p", {class:"m-empty", text:"Portfolio je skryté."}));
+      box.append(card); continue;
+    }
+    card.append(el("div", {class:"m-stats"},
+      el("div", null, el("b", {text: st.done}), el("small", {text:"splněných úkolů"})),
+      el("div", null, el("b", {text: worksCount}), el("small", {text:"prací v portfoliu"}))));
+
+    const works = Array.isArray(raw.works) ? raw.works : [];
+    const wl = el("ul", {class:"m-list"});
+    for (const w of works) {
+      const safe = typeof w.url === "string" && /^https?:\/\//i.test(w.url);
+      const li = el("li", null, el("span", {class:"j-date", text: new Date(w.addedAt || 0).toLocaleDateString("cs-CZ")}),
+        safe ? el("a", {href: w.url, target:"_blank", rel:"noopener noreferrer", text: w.title || w.url}) : el("span", {text: w.title || ""}));
+      if (uid === state.uid && state.db && !state.readOnly) li.append(el("button", {type:"button", class:"j-del", onclick: () => saveWorks(works.filter(x => x !== w), "Práce odebrána"), text:"Odebrat"}));
+      wl.append(li);
+    }
+    const workSec = el("section", {class:"m-sec"}, el("h4", {text:"Portfolio"}));
+    if (works.length) workSec.append(wl); else workSec.append(el("p", {class:"m-empty", text: uid === state.uid ? "Přidej odkazy na svoje videa, loga nebo weby." : "Zatím žádné práce."}));
+    if (uid === state.uid && state.db && !state.readOnly) {
+      workSec.append(el("form", {class:"grid3", onsubmit: ev => {
+        ev.preventDefault();
+        const title = $("w-title").value.trim(), url = $("w-url").value.trim();
+        if (!title) { toast("Napiš, co to je"); return; }
+        if (url && !/^https?:\/\//i.test(url)) { toast("Odkaz musí začínat https://"); return; }
+        saveWorks([...works, {title: title.slice(0, 80), url, addedAt: Date.now()}], "Práce přidána");
+      }},
+        el("label", {class:"lbl", for:"w-title"}, "Co to je", el("input", {type:"text", id:"w-title", maxlength:"80", placeholder:"Např. Logo pro kavárnu"})),
+        el("label", {class:"lbl", for:"w-url"}, "Odkaz", el("input", {type:"text", id:"w-url", placeholder:"https://…"})),
+        el("button", {type:"submit", class:"primary", text:"Přidat"})));
+    }
+    card.append(badgeRow(uid));
+    card.append(workSec);
+
+    const subSec = el("section", {class:"m-sec"}, el("h4", {text:"Historie"}));
+    if (st.items.length) {
+      const ul = el("ul", {class:"m-list"});
+      for (const it of st.items.slice(0, 20)) {
+        const t = state.tasks.find(x => x.id === it.tid);
+        if (!t || !(mgr() || canSee(t, state.uid))) continue;
+        ul.append(el("li", null, el("span", {class:"j-date", text: new Date(it.submittedAt).toLocaleDateString("cs-CZ")}),
+          el("span", {class:"m-task"}, el("b", {text: t.title || "Úkol"}), it.text ? el("span", {class:"m-text", text: it.text.length > 140 ? it.text.slice(0, 139) + "…" : it.text}) : el("span", {class:"m-text", text:"Odškrtnuto ✓"}))));
+      }
+      subSec.append(ul);
+    } else subSec.append(el("p", {class:"m-empty", text:"Historie se začne plnit s prvním splněným úkolem."}));
+    card.append(subSec);
+    box.append(card);
+  }
+}
+
+async function saveMyDoc(patch, msg){
+  try { await state.db.doc("subs/"+state.uid).set(Object.assign({}, state.myDoc, patch)); if (msg) toast(msg); }
+  catch(e){ handleWriteError(e); }
+}
+async function saveWorks(works, msg){
+  try { await state.db.doc("subs/"+state.uid).set(Object.assign({}, state.myDoc, {works})); toast(msg); }
+  catch(e){ handleWriteError(e); }
+}
+
+// ---- Vesmír: pohyb po mapě a hvězdy ----
+state.cam = null; state.bbox = null; state.dragMoved = false;
+function applyCam(){
+  const g = document.getElementById("cam"); if (!g || !state.cam) return;
+  g.setAttribute("transform", `translate(${state.cam.x} ${state.cam.y}) scale(${state.cam.k})`);
+  drawStars();
+}
+function homeCam(){
+  const sp = $("space"); if (!sp || !state.bbox) return;
+  const W = sp.clientWidth || 800, H = sp.clientHeight || 460, b = state.bbox;
+  if (!sp.clientWidth) { state.cam = state.cam || {x:400, y:230, k:1}; return; }
+  state.camHomed = true;
+  const k = Math.min(1.1, Math.max(W < 600 ? 0.5 : 0.35, Math.min(W / (b.w + 120), H / (b.h + 80))));
+  state.cam = {x: W / 2 - (b.x + b.w / 2) * k, y: H / 2 - (b.y + b.h / 2) * k, k};
+  applyCam();
+}
+function zoomAt(f, cx, cy){
+  if (!state.cam) return;
+  const k = Math.min(2.5, Math.max(0.2, state.cam.k * f));
+  const r = k / state.cam.k;
+  state.cam = {x: cx - (cx - state.cam.x) * r, y: cy - (cy - state.cam.y) * r, k};
+  applyCam();
+}
+
+// hvězdy: tři vrstvy s paralaxou, opakující se dlaždice = nekonečný prostor
+const STAR_LAYERS = (() => {
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  return [{f:0.12, n:320, r:[0.35,0.9]}, {f:0.3, n:140, r:[0.6,1.4]}, {f:0.6, n:45, r:[1.0,2.2]}].map(L => ({
+    f: L.f, stars: Array.from({length: L.n}, () => ({x: rnd() * 1200, y: rnd() * 1200, r: L.r[0] + rnd() * (L.r[1] - L.r[0]), p: rnd() * 6.28, s: 0.6 + rnd() * 1.8, c: rnd() < 0.12 ? "#d7b3e2" : rnd() < 0.08 ? "#a6d3ad" : "#ffffff"}))
+  }));
+})();
+const NEBULAE = [{x:300, y:200, r:420, c:"169,112,185", a:0.16}, {x:-500, y:-250, r:520, c:"102,146,109", a:0.10}, {x:1100, y:-400, r:380, c:"169,112,185", a:0.10}, {x:-1200, y:500, r:600, c:"125,70,144", a:0.12}];
+let starT = 0;
+// vesmírná tělesa: slunce, galaxie, planety (opakují se s velkou periodou, takže je najdeš dál a dál)
+const GALAXY_PTS = (() => {
+  let seed = 42; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  return Array.from({length: 1100}, (_, i) => {
+    const arm = i % 2, t = rnd() * 4 * Math.PI, r = Math.pow(t / (4 * Math.PI), 0.9);
+    const a = t + arm * Math.PI + (rnd() - 0.5) * 0.6;
+    return {x: Math.cos(a) * r, y: Math.sin(a) * r, s: 0.4 + rnd() * 1.2, c: rnd() < 0.5 ? "#d7b3e2" : rnd() < 0.5 ? "#ffffff" : "#a970b9", p: rnd() * 6.28};
+  });
+})();
+const BODIES = [
+  {type:"sun", x:-1100, y:-650, f:0.35, r:95},
+  {type:"galaxy", x:1500, y:700, f:0.18, r:260, rot:0.5},
+  {type:"planet", x:850, y:-520, f:0.5, r:36, c1:"#d7b3e2", c2:"#5b2f6a", ring:true},
+  {type:"planet", x:-750, y:620, f:0.45, r:24, c1:"#a6d3ad", c2:"#2f5236"},
+  {type:"planet", x:2100, y:-900, f:0.4, r:16, c1:"#f3eaf6", c2:"#6f6676"},
+  {type:"galaxy", x:-2200, y:1300, f:0.15, r:180, rot:2.1},
+  {type:"sun", x:2600, y:1500, f:0.3, r:40},
+  {type:"hole", x:120, y:-520, f:0.42, r:34},
+  {type:"hole", x:3200, y:-1800, f:0.35, r:30}
+];
+function drawBodies(ctx, W, H, cam){
+  const T = 6000;
+  for (const b of BODIES) {
+    const per = T * b.f, sc = 0.55 + 0.45 * cam.k;
+    let x0 = W / 2 + (cam.x - W / 2) * b.f + b.x * b.f, y0 = H / 2 + (cam.y - H / 2) * b.f + b.y * b.f;
+    x0 = ((x0 % per) + per) % per; y0 = ((y0 % per) + per) % per;
+    for (let x = x0 - per; x < W + per; x += per) for (let y = y0 - per; y < H + per; y += per) {
+      const R = b.r * sc;
+      if (x < -R * 4 || y < -R * 4 || x > W + R * 4 || y > H + R * 4) continue;
+      if (b.type === "hole") { drawBlackHole(ctx, x, y, R); }
+      else if (b.type === "sun") {
+        const g = ctx.createRadialGradient(x, y, 0, x, y, R * 4);
+        g.addColorStop(0, "rgba(255,248,225,1)"); g.addColorStop(0.18, "rgba(255,214,120,0.95)"); g.addColorStop(0.35, "rgba(255,170,60,0.35)"); g.addColorStop(1, "rgba(255,150,40,0)");
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R * 4, 0, 6.283); ctx.fill();
+        ctx.save(); ctx.translate(x, y); ctx.rotate(starT * 0.05);
+        ctx.strokeStyle = "rgba(255,220,150,0.18)"; ctx.lineWidth = 2;
+        for (let i = 0; i < 12; i++) { ctx.rotate(Math.PI / 6); ctx.beginPath(); ctx.moveTo(R * 1.1, 0); ctx.lineTo(R * (2.2 + (i % 3) * 0.5), 0); ctx.stroke(); }
+        ctx.restore();
+      } else if (b.type === "galaxy") {
+        const core = ctx.createRadialGradient(x, y, 0, x, y, R * 0.22);
+        core.addColorStop(0, "rgba(255,245,255,0.95)"); core.addColorStop(0.4, "rgba(215,179,226,0.5)"); core.addColorStop(1, "rgba(169,112,185,0)");
+        ctx.fillStyle = core; ctx.beginPath(); ctx.ellipse(x, y, R * 0.22, R * 0.12, b.rot, 0, 6.283); ctx.fill();
+        const cs = Math.cos(b.rot + starT * 0.01), sn = Math.sin(b.rot + starT * 0.01);
+        for (const p of GALAXY_PTS) {
+          const px = p.x * R, py = p.y * R * 0.42;
+          const gx = x + px * cs - py * sn, gy = y + px * sn + py * cs;
+          ctx.globalAlpha = 0.45 + 0.35 * Math.sin(starT * 0.8 + p.p); ctx.fillStyle = p.c;
+          ctx.fillRect(gx, gy, p.s * sc * 1.6, p.s * sc * 1.6);
+        }
+        ctx.globalAlpha = 1;
+      } else {
+        if (b.ring) { ctx.strokeStyle = "rgba(215,179,226,0.55)"; ctx.lineWidth = 3 * sc; ctx.beginPath(); ctx.ellipse(x, y, R * 2, R * 0.55, -0.35, Math.PI, 2 * Math.PI); ctx.stroke(); }
+        const atm = ctx.createRadialGradient(x, y, R * 0.9, x, y, R * 1.5);
+        atm.addColorStop(0, "rgba(215,179,226,0.35)"); atm.addColorStop(1, "rgba(215,179,226,0)");
+        ctx.fillStyle = atm; ctx.beginPath(); ctx.arc(x, y, R * 1.5, 0, 6.283); ctx.fill();
+        const g = ctx.createRadialGradient(x - R * 0.4, y - R * 0.4, R * 0.1, x, y, R);
+        g.addColorStop(0, b.c1); g.addColorStop(1, b.c2);
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, 6.283); ctx.fill();
+        if (b.ring) { ctx.strokeStyle = "rgba(215,179,226,0.75)"; ctx.lineWidth = 3 * sc; ctx.beginPath(); ctx.ellipse(x, y, R * 2, R * 0.55, -0.35, 0, Math.PI); ctx.stroke(); }
+      }
+    }
+  }
+}
+// epický vesmír: předpočítaná textura mlhovin + Mléčná dráha, padající hvězdy, vinětace
+const NEB_T = 1800;
+let NEB_TEX = null;
+function nebulaTexture(){
+  if (NEB_TEX) return NEB_TEX;
+  const c = document.createElement("canvas"); c.width = NEB_T; c.height = NEB_T;
+  const x = c.getContext("2d");
+  let seed = 99; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  x.fillStyle = "#000000"; x.fillRect(0, 0, NEB_T, NEB_T);
+  x.globalCompositeOperation = "lighter";
+  const blob = (cx, cy, r, col, a) => {
+    for (const ox of [-NEB_T, 0, NEB_T]) for (const oy of [-NEB_T, 0, NEB_T]) {
+      const px = cx + ox, py = cy + oy;
+      if (px + r < 0 || py + r < 0 || px - r > NEB_T || py - r > NEB_T) continue;
+      const g = x.createRadialGradient(px, py, 0, px, py, r);
+      g.addColorStop(0, `rgba(${col},${a})`); g.addColorStop(0.5, `rgba(${col},${a * 0.35})`); g.addColorStop(1, `rgba(${col},0)`);
+      x.fillStyle = g; x.fillRect(px - r, py - r, r * 2, r * 2);
+    }
+  };
+  const palette = ["169,112,185", "125,70,144", "201,155,216", "102,146,109", "60,90,160", "190,80,150"];
+  // velké mlhoviny ve shlucích
+  for (let k = 0; k < 5; k++) {
+    const cx = rnd() * NEB_T, cy = rnd() * NEB_T, base = palette[Math.floor(rnd() * palette.length)];
+    for (let i = 0; i < 26; i++) {
+      const a = rnd() * 6.283, d = Math.pow(rnd(), 0.7) * 380;
+      blob(cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.6, 60 + rnd() * 220, rnd() < 0.7 ? base : palette[Math.floor(rnd() * palette.length)], 0.05 + rnd() * 0.07);
+    }
+    blob(cx, cy, 120, "255,235,255", 0.06);
+  }
+  // Mléčná dráha: diagonální pás
+  for (let i = 0; i < 70; i++) {
+    const t = rnd(), px = t * NEB_T, py = NEB_T * 0.15 + t * NEB_T + (rnd() - 0.5) * 160;
+    blob(((px % NEB_T) + NEB_T) % NEB_T, ((py % NEB_T) + NEB_T) % NEB_T, 90 + rnd() * 160, rnd() < 0.5 ? "200,190,230" : "169,112,185", 0.05 + rnd() * 0.04);
+  }
+  x.globalCompositeOperation = "source-over";
+  for (let i = 0; i < 2600; i++) {
+    const t = rnd(), px = t * NEB_T + (rnd() - 0.5) * 60, py = NEB_T * 0.15 + t * NEB_T + (rnd() + rnd() + rnd() - 1.5) * 150;
+    x.globalAlpha = 0.25 + rnd() * 0.6; x.fillStyle = rnd() < 0.15 ? "#d7b3e2" : "#ffffff";
+    const r = rnd() < 0.97 ? 0.6 : 1.3; x.fillRect(((px % NEB_T) + NEB_T) % NEB_T, ((py % NEB_T) + NEB_T) % NEB_T, r, r);
+  }
+  // temné prachové pruhy přes Mléčnou dráhu
+  x.globalAlpha = 1;
+  for (let i = 0; i < 40; i++) {
+    const t = rnd(), cx = t * NEB_T, cy = (((NEB_T * 0.15 + t * NEB_T + (rnd() - 0.5) * 50) % NEB_T) + NEB_T) % NEB_T, r = 30 + rnd() * 70;
+    for (const ox of [-NEB_T, 0, NEB_T]) for (const oy of [-NEB_T, 0, NEB_T]) {
+      const px = cx + ox, py = cy + oy; if (px + r < 0 || py + r < 0 || px - r > NEB_T || py - r > NEB_T) continue;
+      const g = x.createRadialGradient(px, py, 0, px, py, r);
+      g.addColorStop(0, "rgba(0,0,0,0.35)"); g.addColorStop(1, "rgba(0,0,0,0)");
+      x.fillStyle = g; x.fillRect(px - r, py - r, r * 2, r * 2);
+    }
+  }
+  NEB_TEX = c; return c;
+}
+function drawNebula(ctx, W, H, cam){
+  const tex = nebulaTexture(), f = 0.08;
+  const ox = (((W / 2 + (cam.x - W / 2) * f) % NEB_T) + NEB_T) % NEB_T, oy = (((H / 2 + (cam.y - H / 2) * f) % NEB_T) + NEB_T) % NEB_T;
+  for (let tx = ox - NEB_T; tx < W; tx += NEB_T) for (let ty = oy - NEB_T; ty < H; ty += NEB_T) ctx.drawImage(tex, tx, ty);
+}
+const METEORS = []; let nextMeteor = 2;
+function drawMeteors(ctx, W, H){
+  if (starT > nextMeteor) {
+    nextMeteor = starT + 3 + Math.random() * 5;
+    const a = Math.PI * (0.15 + Math.random() * 0.2) * (Math.random() < 0.5 ? 1 : -1) + (Math.random() < 0.5 ? 0 : Math.PI);
+    METEORS.push({x: Math.random() * W, y: Math.random() * H * 0.6, vx: Math.cos(a) * 520, vy: Math.abs(Math.sin(a)) * 520, born: starT, life: 0.9 + Math.random() * 0.5});
+  }
+  for (let i = METEORS.length - 1; i >= 0; i--) {
+    const m = METEORS[i], t = starT - m.born;
+    if (t > m.life) { METEORS.splice(i, 1); continue; }
+    const hx = m.x + m.vx * t, hy = m.y + m.vy * t, len = 0.18;
+    const g = ctx.createLinearGradient(hx, hy, hx - m.vx * len, hy - m.vy * len);
+    const a = Math.sin(Math.PI * t / m.life);
+    g.addColorStop(0, `rgba(255,255,255,${0.95 * a})`); g.addColorStop(0.3, `rgba(215,179,226,${0.5 * a})`); g.addColorStop(1, "rgba(169,112,185,0)");
+    ctx.strokeStyle = g; ctx.lineWidth = 2; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - m.vx * len, hy - m.vy * len); ctx.stroke();
+    ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.beginPath(); ctx.arc(hx, hy, 1.6, 0, 6.283); ctx.fill();
+  }
+}
+function drawVignette(ctx, W, H){
+  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.65)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function drawSpikes(ctx, x, y, r, a){
+  ctx.globalAlpha = a * 0.55; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.8;
+  const L = r * 7;
+  ctx.beginPath(); ctx.moveTo(x - L, y); ctx.lineTo(x + L, y); ctx.moveTo(x, y - L); ctx.lineTo(x, y + L); ctx.stroke();
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
+  g.addColorStop(0, "rgba(255,255,255,0.5)"); g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.globalAlpha = a; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 4, 0, 6.283); ctx.fill();
+}
+const STILL = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+// ---- INSANE: živá mlhovina na grafické kartě (WebGL), černá díra, skok hyperprostorem ----
+const GL = {ok:false, gl:null, prog:null, loc:{}, scale:0.5};
+function setupGL(){
+  const cv = $("nebula"); if (!cv || GL.tried) return; GL.tried = true;
+  let gl = null;
+  try { gl = cv.getContext("webgl", {antialias:false, premultipliedAlpha:false, preserveDrawingBuffer:false}); } catch(_){}
+  if (!gl) return;
+  const vs = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
+  const fs = `precision mediump float;
+uniform vec2 r;uniform float t;uniform vec2 c;uniform float z;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1.,0.)),f.x),mix(h(i+vec2(0.,1.)),h(i+vec2(1.,1.)),f.x),f.y);}
+float fbm(vec2 p){float v=0.,a=.5;mat2 m=mat2(1.6,1.2,-1.2,1.6);for(int i=0;i<5;i++){v+=a*n(p);p=m*p;a*=.5;}return v;}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*r)/r.y;
+  vec2 p=uv*1.7/(.75+.25*z)+c;
+  float tt=t*.02;
+  vec2 q=vec2(fbm(p+vec2(0.,tt)),fbm(p+vec2(5.2,1.3)-tt));
+  vec2 w=vec2(fbm(p+4.*q+vec2(1.7,9.2)+tt*.6),fbm(p+4.*q+vec2(8.3,2.8)-tt*.4));
+  float f=fbm(p+3.6*w);
+  vec3 deep=vec3(.06,.02,.12),purple=vec3(.62,.28,.86),blue=vec3(.08,.62,.70),green=vec3(1.,.55,.18),pink=vec3(1.,.28,.62),white=vec3(1.,.95,.9);
+  vec3 col=mix(deep,purple,clamp(f*f*2.2,0.,1.));
+  col=mix(col,blue,clamp(length(q)*.7,0.,1.)*.55);
+  col=mix(col,green,clamp(w.y*w.y*1.3,0.,1.)*.4);
+  col=mix(col,pink,smoothstep(.62,.92,f)*.55);
+  float dens=smoothstep(.36,.95,f);
+  float dust=smoothstep(.52,.78,fbm(p*2.4-w*1.6+vec2(3.,7.)));
+  col*=dens*(1.-dust*.7);
+  col+=white*pow(smoothstep(.72,1.,f),3.)*.7;
+  float band=exp(-pow((uv.y-uv.x*.45+.05)*3.,2.));
+  col+=vec3(.55,.48,.7)*band*.12*(.6+.8*fbm(p*3.));
+  gl_FragColor=vec4(col*.8,1.);
+}`;
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null; };
+  const v = sh(gl.VERTEX_SHADER, vs), f = sh(gl.FRAGMENT_SHADER, fs); if (!v || !f) return;
+  const prog = gl.createProgram(); gl.attachShader(prog, v); gl.attachShader(prog, f); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return;
+  gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const pl = gl.getAttribLocation(prog, "p"); gl.enableVertexAttribArray(pl); gl.vertexAttribPointer(pl, 2, gl.FLOAT, false, 0, 0);
+  GL.loc = {r: gl.getUniformLocation(prog, "r"), t: gl.getUniformLocation(prog, "t"), c: gl.getUniformLocation(prog, "c"), z: gl.getUniformLocation(prog, "z")};
+  GL.gl = gl; GL.prog = prog; GL.ok = true;
+  $("space").classList.add("gl");
+}
+function renderGL(W, H, cam){
+  if (!GL.ok) return;
+  const cv = $("nebula"), gl = GL.gl, s = GL.scale * Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(2, Math.round(W * s)), h = Math.max(2, Math.round(H * s));
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; gl.viewport(0, 0, w, h); }
+  gl.uniform2f(GL.loc.r, w, h); gl.uniform1f(GL.loc.t, starT * 0.35);
+  gl.uniform2f(GL.loc.c, 0.0, 0.0);
+  gl.uniform1f(GL.loc.z, cam.k);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+function drawBlackHole(ctx, x, y, R){
+  const glow = ctx.createRadialGradient(x, y, R * 0.8, x, y, R * 5);
+  glow.addColorStop(0, "rgba(255,170,90,0.35)"); glow.addColorStop(0.3, "rgba(169,112,185,0.18)"); glow.addColorStop(1, "rgba(169,112,185,0)");
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, R * 5, 0, 6.283); ctx.fill();
+  const disk = (from, to) => {
+    for (let i = 0; i < 12; i++) {
+      const rr = R * (1.4 + i * 0.17), a = 0.7 - i * 0.05;
+      ctx.strokeStyle = i < 3 ? `rgba(255,236,200,${a})` : i < 7 ? `rgba(255,170,90,${a * 0.8})` : `rgba(201,155,216,${a * 0.7})`;
+      ctx.lineWidth = R * 0.12; ctx.setLineDash([R * (0.9 + (i % 3) * 0.5), R * 0.12]); ctx.lineDashOffset = -starT * R * (2.4 - i * 0.15);
+      ctx.beginPath(); ctx.ellipse(x, y, rr, rr * 0.28, -0.25, from, to); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  };
+  disk(Math.PI, 2 * Math.PI);
+  const lens = ctx.createRadialGradient(x, y, R * 0.95, x, y, R * 1.35);
+  lens.addColorStop(0, "rgba(255,240,220,0.95)"); lens.addColorStop(0.35, "rgba(255,180,100,0.5)"); lens.addColorStop(1, "rgba(255,160,80,0)");
+  ctx.fillStyle = lens; ctx.beginPath(); ctx.arc(x, y, R * 1.35, 0, 6.283); ctx.fill();
+  ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.arc(x, y, R, 0, 6.283); ctx.fill();
+  disk(0, Math.PI);
+}
+
+state.warp = null;
+function startWarp(){ if (STILL) return; state.warp = starT || 0; const t = $("tree"); if (t) { t.classList.remove("warp-in"); void t.offsetWidth; t.classList.add("warp-in"); } }
+function drawWarp(ctx, W, H){
+  if (state.warp == null) return 1;
+  const p = (starT - state.warp) / 1.6;
+  if (p >= 1 || p < 0) { state.warp = null; return 1; }
+  const e = 1 - Math.pow(p, 0.6);
+  let seed = 5; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  ctx.lineCap = "round";
+  for (let i = 0; i < 260; i++) {
+    const a = rnd() * 6.283, d0 = 20 + rnd() * Math.max(W, H) * 0.7, d = d0 * (0.4 + p * 1.6);
+    const x = W / 2 + Math.cos(a) * d, y = H / 2 + Math.sin(a) * d, L = d * e * 0.55;
+    ctx.globalAlpha = 0.25 + 0.75 * e; ctx.strokeStyle = rnd() < 0.2 ? "#d7b3e2" : "#ffffff"; ctx.lineWidth = 0.6 + rnd() * 1.4;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - Math.cos(a) * L, y - Math.sin(a) * L); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  const flash = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
+  flash.addColorStop(0, `rgba(215,179,226,${0.45 * e})`); flash.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = flash; ctx.fillRect(0, 0, W, H);
+  return p;
+}
+function drawStars(){
+  const cv = $("stars"), sp = $("space"); if (!cv || !sp) return;
+  const dpr = window.devicePixelRatio || 1, W = sp.clientWidth, H = sp.clientHeight;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (GL.ok) ctx.clearRect(0, 0, W, H); else { ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, W, H); }
+  const cam = state.cam || {x: W / 2, y: H / 2, k: 1};
+  if (GL.ok) renderGL(W, H, cam); else drawNebula(ctx, W, H, cam);
+  for (const L of STAR_LAYERS) {
+    const T = 1200, ox = 0, oy = 0;
+    for (const st of L.stars) {
+      for (let tx = -T; tx < W + T; tx += T) for (let ty = -T; ty < H + T; ty += T) {
+        const x = st.x + ox + tx - T, y = st.y + oy + ty - T;
+        if (x < -4 || y < -4 || x > W + 4 || y > H + 4) continue;
+        const a = 0.82 + 0.18 * Math.sin(starT * st.s * 0.5 + st.p);
+        ctx.globalAlpha = a; ctx.fillStyle = st.c;
+        ctx.beginPath(); ctx.arc(x, y, st.r, 0, 6.283); ctx.fill();
+        if (st.r > 1.9) drawSpikes(ctx, x, y, st.r, a);
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  drawDistantGalaxy(ctx, W, H);
+  drawVoyageWorld(ctx, W, H, cam);
+  drawCinema(ctx, W, H);
+  drawWarp(ctx, W, H);
+  drawVignette(ctx, W, H);
+}
+function setupSpace(){
+  const sp = $("space"); if (!sp || sp.dataset.ready) return; sp.dataset.ready = "1";
+  setupGL();
+  const pts = new Map(); let last = null, pinch = null;
+  sp.addEventListener("pointerdown", e => {
+    if (e.target.closest(".space-ctl")) return;
+    pts.set(e.pointerId, {x:e.clientX, y:e.clientY}); state.dragMoved = false;
+    last = {x:e.clientX, y:e.clientY};
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = Math.hypot(a.x - b.x, a.y - b.y); }
+  });
+  sp.addEventListener("pointermove", e => {
+    if (!pts.has(e.pointerId) || !state.cam) return;
+    pts.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    if (pts.size === 2 && pinch) {
+      const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y), rect = sp.getBoundingClientRect();
+      zoomAt(1 + (d / pinch - 1) * 0.6, (a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top); pinch = d; state.dragMoved = true; return;
+    }
+    const dx = e.clientX - last.x, dy = e.clientY - last.y;
+    if (!state.dragMoved && Math.hypot(dx, dy) < 5) return;
+    if (!state.dragMoved) { state.dragMoved = true; try { sp.setPointerCapture(e.pointerId); } catch(_){} sp.classList.add("dragging"); }
+    state.cam.x += dx * 0.8; state.cam.y += dy * 0.8; last = {x:e.clientX, y:e.clientY}; applyCam();
+  });
+  const end = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!pts.size) sp.classList.remove("dragging"); };
+  sp.addEventListener("pointerup", end); sp.addEventListener("pointercancel", end);
+  sp.addEventListener("click", e => { if (state.dragMoved) { e.stopPropagation(); e.preventDefault(); state.dragMoved = false; } }, true);
+  sp.addEventListener("wheel", e => { e.preventDefault(); const r = sp.getBoundingClientRect(); zoomAt(Math.exp(-Math.max(-60, Math.min(60, e.deltaY)) * 0.0015), e.clientX - r.left, e.clientY - r.top); }, {passive:false});
+  $("cam-in").addEventListener("click", () => zoomAt(1.15, sp.clientWidth / 2, sp.clientHeight / 2));
+  $("cam-out").addEventListener("click", () => zoomAt(0.87, sp.clientWidth / 2, sp.clientHeight / 2));
+  $("cam-home").addEventListener("click", homeCam);
+  try { new ResizeObserver(() => drawStars()).observe(sp); } catch(_){}
+  const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const loop = t => { starT = t / 1000; if (!$("view-cesta").hidden) drawStars(); requestAnimationFrame(loop); };
+  if (!still) requestAnimationFrame(loop); else drawStars();
+}
+
+// ---- Správa (jen owner): role v týmu ----
+const ROLES = {
+  moderator: {name:"Moderátor", desc:"Zadává úkoly, vidí všechno a v aplikaci může dělat cokoli kromě měnění rolí. Má portfolio."},
+  clen: {name:"Člen", desc:"Plní a odevzdává úkoly, má portfolio a historii."},
+  host: {name:"Host", desc:"Jen se dívá na úkoly a na Cestu. Nic nemůže měnit a nemá portfolio."}
+};
+state.roles = {};
+function roleOf(uid){ if (state.members[uid] && state.members[uid].boss) return "owner"; const r = state.roles[uid]; return ROLES[r] ? r : "clen"; }
+function mgr(){ return !!state.owner || (state.uid && roleOf(state.uid) === "moderator"); }
+function isHost(uid){ return roleOf(uid) === "host"; }
+
+async function saveRoles(roles, msg){
+  try { await state.db.doc("roles/map").set({r: roles, showRank: !!state.showRank}); toast(msg); }
+  catch(e){ handleWriteError(e); }
+}
+async function setRemoved(uid, removed){
+  const raw = Object.assign({}, state.membersRaw[uid] || {});
+  raw.removed = removed;
+  try { await state.db.doc("subs/"+uid).set(raw); toast(removed ? "Odebráno z týmu" : "Vráceno do týmu"); state.confirmRemove = null; }
+  catch(e){ handleWriteError(e); }
+}
+
+function renderAdmin(){
+  const tab = $("tab-sprava"), box = $("admin");
+  if (tab) tab.hidden = !state.owner;
+  if (!box || !state.owner) return;
+  const all = Object.keys(state.membersAll || {}).sort((a, b) => (state.membersAll[a].joinedAt||0) - (state.membersAll[b].joinedAt||0));
+  const det = el("details", {class:"roles-help"}, el("summary", {text:"Zobrazit víc"}),
+    el("p", {text:"Tenhle panel vidíš jen ty. Owner jsi jen ty a máš přístup ke všemu. Ostatním tady měníš role."}),
+    el("dl", {class:"roles-legend"}, el("dt", {text:"Owner"}), el("dd", {text:"Jen ty. Přístup ke všemu včetně rolí a ranku."}), Object.values(ROLES).flatMap(r => [el("dt", {text:r.name}), el("dd", {text:r.desc})])),
+    el("p", {text:"Odebrání z týmu schová člověka ze stránky. Odebraný člověk ztratí přístup k úkolům a datům týmu."}));
+  if (state.helpOpen) det.open = true;
+  det.addEventListener("toggle", () => { state.helpOpen = det.open; });
+  const shr = el("input", {type:"checkbox", id:"show-rank", checked: state.showRank ? true : null});
+  shr.addEventListener("change", async () => { try { await state.db.doc("roles/map").set({r: state.roles, showRank: shr.checked}); toast(shr.checked ? "Rank teď vidí celý tým" : "Rank vidíš jen ty"); } catch(e){ handleWriteError(e); } });
+  const joinInfo = window.__appConfig ? el("p", {class:"join-code"}, "Kód pro připojení do týmu: ", el("b", {text: window.__appConfig.joinCode}), " (pošli ho klukům spolu s odkazem)") : null;
+  const kids = [el("div", {class:"panel roles-head"}, el("h3", {text:"Role"}), joinInfo, det, el("label", {class:"toggle", for:"show-rank"}, shr, "Ukázat ligu a rank celému týmu"))];
+  if (!all.length) kids.push(el("div", {class:"empty"}, el("b", {text:"Zatím se nikdo nepřipojil"}), "Jakmile si někdo napíše jméno, objeví se tady."));
+  for (const uid of all) {
+    const m = state.membersAll[uid], raw = state.membersRaw[uid] || {};
+    const row = el("div", {class:"admin-row"+(raw.removed ? " removed" : "")});
+    row.append(el("div", {class:"admin-name"}, el("b", null, m.name, m.boss ? el("span", {class:"cap", text:"owner"}) : null), el("small", {text: raw.removed ? "Odebraný z týmu" : (m.joinedAt > 1e12 ? "V týmu od " + new Date(m.joinedAt).toLocaleDateString("cs-CZ") : "")})));
+    if (m.boss) { row.append(el("span", {class:"pill ok", text:"Owner"})); kids.push(row); continue; }
+    const id = "role-" + uid;
+    const sel = el("select", {id, "aria-label":"Role pro " + m.name, disabled: raw.removed ? true : null});
+    for (const [k, r] of Object.entries(ROLES)) { const o = el("option", {value:k, text:r.name}); if (roleOf(uid) === k) o.selected = true; sel.append(o); }
+    sel.addEventListener("change", () => { const roles = Object.assign({}, state.roles); if (sel.value === "clen") delete roles[uid]; else roles[uid] = sel.value; saveRoles(roles, m.name + " je teď " + ROLES[sel.value].name.toLowerCase()); });
+    const ctl = el("div", {class:"admin-ctl"}, sel);
+    if (raw.removed) ctl.append(el("button", {type:"button", onclick:()=>setRemoved(uid, false), text:"Vrátit do týmu"}));
+    else if (state.confirmRemove === uid) ctl.append(
+      el("button", {type:"button", class:"badb", onclick:()=>setRemoved(uid, true), text:"Ano, odebrat"}),
+      el("button", {type:"button", onclick:()=>{ state.confirmRemove = null; renderAdmin(); }, text:"Zpět"}));
+    else ctl.append(el("button", {type:"button", class:"badb", onclick:()=>{ state.confirmRemove = uid; renderAdmin(); }, text:"Odebrat z týmu"}));
+    row.append(ctl);
+    kids.push(row);
+  }
+  box.replaceChildren(...kids);
+}
+
+// ---- Živější grafika výpravy ----
+const PTEX = new Map();
+function planetTex(p, idx){
+  if (PTEX.has(idx)) return PTEX.get(idx);
+  const W = 512, H = 256, c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d");
+  let seed = 1000 + idx * 97; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const [c1, c2] = p.c, a = hexRgb(c1), b = hexRgb(c2);
+  const mix = (t, j) => `rgb(${Math.round(a[0] + (b[0] - a[0]) * t + j)},${Math.round(a[1] + (b[1] - a[1]) * t + j)},${Math.round(a[2] + (b[2] - a[2]) * t + j)})`;
+  for (let y = 0; y < H; y += 2) {
+    const t = 0.5 + 0.5 * Math.sin(y * 0.045 + Math.sin(y * 0.013 + idx) * 2.2), j = (rnd() - 0.5) * 18;
+    x.fillStyle = mix(t, j); x.fillRect(0, y, W, 2);
+  }
+  // víry a skvrny (opakují se přes okraj kvůli plynulé rotaci)
+  for (let k = 0; k < 26; k++) {
+    const cx = rnd() * W, cy = rnd() * H, r = 6 + rnd() * 28, light = rnd() < 0.5;
+    for (const ox of [-W, 0, W]) {
+      const g = x.createRadialGradient(cx + ox, cy, 0, cx + ox, cy, r);
+      g.addColorStop(0, light ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.35)"); g.addColorStop(1, "rgba(0,0,0,0)");
+      x.fillStyle = g; x.beginPath(); x.ellipse(cx + ox, cy, r * 1.8, r * 0.6, 0, 0, 6.283); x.fill();
+    }
+  }
+  // mraky
+  const cl = document.createElement("canvas"); cl.width = W; cl.height = H; const y2 = cl.getContext("2d");
+  for (let k = 0; k < 40; k++) {
+    const cx = rnd() * W, cy = rnd() * H, r = 10 + rnd() * 34;
+    for (const ox of [-W, 0, W]) {
+      const g = y2.createRadialGradient(cx + ox, cy, 0, cx + ox, cy, r);
+      g.addColorStop(0, "rgba(255,255,255,0.42)"); g.addColorStop(1, "rgba(255,255,255,0)");
+      y2.fillStyle = g; y2.beginPath(); y2.ellipse(cx + ox, cy, r * 2.2, r * 0.45, 0, 0, 6.283); y2.fill();
+    }
+  }
+  const out = {tex: c, clouds: cl, moon: !p.ring && idx % 3 === 0, tilt: (rnd() - 0.5) * 0.5};
+  PTEX.set(idx, out); return out;
+}
+function drawPlanet2(ctx, x, y, R, p, idx, reached, fog){
+  if (fog || R < 3) { drawPlanet(ctx, x, y, R, p, 0, reached, fog); return; }
+  const T = planetTex(p, idx), [c1] = p.c, spin = starT * (0.02 + (idx % 4) * 0.008);
+  // atmosféra
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  const atm = ctx.createRadialGradient(x, y, R * 0.85, x, y, R * 1.55);
+  atm.addColorStop(0, c1 + (reached ? "77" : "33")); atm.addColorStop(1, c1 + "00");
+  ctx.fillStyle = atm; ctx.beginPath(); ctx.arc(x, y, R * 1.55, 0, 6.283); ctx.fill(); ctx.restore();
+  const ring = (front) => {
+    if (!p.ring) return;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-0.3 + T.tilt);
+    for (let k = 0; k < 4; k++) {
+      ctx.strokeStyle = k % 2 ? c1 + "66" : "rgba(255,255,255,0.35)"; ctx.lineWidth = Math.max(1, R * (0.05 + k * 0.012));
+      ctx.beginPath(); ctx.ellipse(0, 0, R * (1.55 + k * 0.16), R * (0.38 + k * 0.045), 0, front ? 0 : Math.PI, front ? Math.PI : 2 * Math.PI); ctx.stroke();
+    }
+    ctx.restore();
+  };
+  ring(false);
+  ctx.save(); ctx.beginPath(); ctx.arc(x, y, R, 0, 6.283); ctx.clip();
+  ctx.translate(x, y); ctx.rotate(T.tilt);
+  const tw = R * 4, th = R * 2, off = ((spin * tw) % tw + tw) % tw;
+  ctx.drawImage(T.tex, -R - off, -R, tw, th); ctx.drawImage(T.tex, -R - off + tw, -R, tw, th);
+  const coff = ((spin * 1.6 * tw) % tw + tw) % tw;
+  ctx.globalAlpha = 0.8; ctx.drawImage(T.clouds, -R - coff, -R, tw, th); ctx.drawImage(T.clouds, -R - coff + tw, -R, tw, th); ctx.globalAlpha = 1;
+  ctx.rotate(-T.tilt);
+  // koule: světlo zleva nahoře, stín vpravo dole, okrajové světlo
+  const sh = ctx.createRadialGradient(-R * 0.4, -R * 0.45, R * 0.05, 0, 0, R * 1.08);
+  sh.addColorStop(0, "rgba(255,255,255,0.28)"); sh.addColorStop(0.45, "rgba(0,0,0,0)"); sh.addColorStop(0.85, "rgba(0,0,0,0.55)"); sh.addColorStop(1, "rgba(0,0,0,0.85)");
+  ctx.fillStyle = sh; ctx.fillRect(-R, -R, R * 2, R * 2);
+  if (!reached) { ctx.fillStyle = "rgba(12,6,26,0.5)"; ctx.fillRect(-R, -R, R * 2, R * 2); }
+  ctx.restore();
+  ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.strokeStyle = c1 + "aa"; ctx.lineWidth = Math.max(1, R * 0.04);
+  ctx.beginPath(); ctx.arc(x, y, R * 0.99, Math.PI * 0.95, Math.PI * 1.75); ctx.stroke(); ctx.restore();
+  ring(true);
+  if (T.moon && R > 8) {
+    const a = starT * 0.5 + idx, mx = x + Math.cos(a) * R * 1.8, my = y + Math.sin(a) * R * 0.55, mr = Math.max(2, R * 0.16);
+    if (Math.sin(a) < 0 || true) {
+      const g = ctx.createRadialGradient(mx - mr * 0.4, my - mr * 0.4, mr * 0.1, mx, my, mr);
+      g.addColorStop(0, "#f2eefc"); g.addColorStop(1, "#5a5370");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(mx, my, mr, 0, 6.283); ctx.fill();
+    }
+  }
+}
+
+// motor: částice v souřadnicích světa
+const SPARKS = [];
+function engineSparks(ctx, sx, sy, ang, scale, rgb, X, Y, cam){
+  const dt = 1 / 60, back = ang + Math.PI / 2, nx = Math.cos(back), ny = Math.sin(back);
+  for (let i = 0; i < 4; i++) SPARKS.push({x: sx + nx * 18 * scale / cam.k, y: sy + ny * 18 * scale / cam.k, vx: nx * (90 + Math.random() * 120) + (Math.random() - 0.5) * 50, vy: ny * (90 + Math.random() * 120) + (Math.random() - 0.5) * 50, life: 0.5 + Math.random() * 0.5, age: 0});
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  for (let i = SPARKS.length - 1; i >= 0; i--) {
+    const s = SPARKS[i]; s.age += dt; if (s.age > s.life) { SPARKS.splice(i, 1); continue; }
+    s.x += s.vx * dt; s.y += s.vy * dt; s.vx *= 0.96; s.vy *= 0.96;
+    const t = s.age / s.life, a = 1 - t;
+    ctx.fillStyle = t < 0.3 ? `rgba(255,240,210,${a})` : `rgba(${rgb},${a * 0.8})`;
+    ctx.beginPath(); ctx.arc(X(s.x), Y(s.y), Math.max(0.8, (3.2 - t * 2.4) * Math.max(0.6, cam.k * 1.3)), 0, 6.283); ctx.fill();
+  }
+  if (SPARKS.length > 400) SPARKS.splice(0, SPARKS.length - 400);
+  ctx.restore();
+}
+
+// vesmírný prach, který letí kolem lodi (pocit pohybu nahoru)
+const DUST = Array.from({length: 70}, () => ({x: Math.random(), y: Math.random(), z: 0.3 + Math.random() * 0.7}));
+function drawDust(ctx, W, H){
+  const fast = state.flight ? 6 : 1;
+  ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round";
+  for (const d of DUST) {
+    d.y += 0.0009 * d.z * fast; if (d.y > 1.05) { d.y = -0.05; d.x = Math.random(); }
+    const x = d.x * W, y = d.y * H, L = 2 + d.z * 6 * fast;
+    ctx.strokeStyle = `rgba(255,220,255,${0.12 + d.z * 0.3})`; ctx.lineWidth = d.z * 1.6;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - L); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// občas proletí pirátská loď
+let RAV = null, nextRav = 6;
+function drawRavager(ctx, W, H){
+  if (STILL) return;
+  if (!RAV && starT > nextRav) { const l = Math.random() < 0.5; RAV = {x: l ? -40 : W + 40, y: H * (0.15 + Math.random() * 0.6), v: (l ? 1 : -1) * (160 + Math.random() * 120), t0: starT}; }
+  if (!RAV) return;
+  RAV.x += RAV.v / 60; RAV.y += Math.sin((starT - RAV.t0) * 2) * 0.4;
+  const d = RAV.v > 0 ? 1 : -1;
+  ctx.save(); ctx.translate(RAV.x, RAV.y); ctx.scale(d, 1);
+  ctx.globalCompositeOperation = "lighter";
+  const g = ctx.createLinearGradient(-60, 0, -8, 0); g.addColorStop(0, "rgba(255,80,60,0)"); g.addColorStop(1, "rgba(255,140,80,0.9)");
+  ctx.fillStyle = g; ctx.fillRect(-60, -2, 52, 4);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#c2303a"; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-8, -7); ctx.lineTo(-4, 0); ctx.lineTo(-8, 7); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#ffd0a0"; ctx.fillRect(2, -1.5, 5, 3);
+  ctx.restore();
+  if (RAV.x < -80 || RAV.x > W + 80) { RAV = null; nextRav = starT + 9 + Math.random() * 10; }
+}
+
+// světelné pulzy po prošlé trase
+function pathPulses(ctx, u, rgb, X, Y){
+  if (u < 0.05) return;
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  for (let k = 0; k < 4; k++) {
+    const t = ((starT * 0.18 + k / 4) % 1), p = pathAt(u * t), a = Math.sin(t * Math.PI);
+    const g = ctx.createRadialGradient(X(p.x), Y(p.y), 0, X(p.x), Y(p.y), 14);
+    g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(0.4, `rgba(${rgb},${a * 0.8})`); g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), 14, 0, 6.283); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// paprsky kolem cílové planety
+function godRays(ctx, x, y, R, rgb){
+  ctx.save(); ctx.translate(x, y); ctx.rotate(starT * 0.05); ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 14; i++) {
+    ctx.rotate(Math.PI * 2 / 14);
+    const L = R * (2.2 + 0.4 * Math.sin(starT * 0.7 + i * 1.3));
+    const g = ctx.createLinearGradient(R * 0.9, 0, L, 0); g.addColorStop(0, `rgba(${rgb},0.22)`); g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(R * 0.9, -R * 0.08); ctx.lineTo(L, -R * 0.22); ctx.lineTo(L, R * 0.22); ctx.lineTo(R * 0.9, R * 0.08); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---- Výprava: Awesome Mix · Cesta Autaci (svislá cesta vesmírem) ----
+const LEVEL_STOPS = [1, 6, 11, 16, 21, 26, 30];
+const VOLS = [
+  {name:"Vol. 1", planets:[
+    {n:"Morag", d:"Opuštěná planeta, kde to celé začalo. Někdo tu prý tancoval s walkmanem.", c:["#ff9a3c","#7a2e5c"]},
+    {n:"Xandar", d:"Zářivé hlavní město. Tady nás poprvé zatkli. Omylem, samozřejmě.", c:["#5ef2e6","#1f4f9c"], ring:true},
+    {n:"Kyln", d:"Vesmírná věznice. Plán útěku: noha, baterka a hodně improvizace.", c:["#c7cbd6","#4b3f6b"]},
+    {n:"Knowhere", d:"Hornická kolonie v hlavě obří bytosti. Hygiena sporná, atmosféra skvělá.", c:["#ffcf5a","#8a3b1f"]},
+    {n:"Flotila Ravagerů", d:"Partička pirátů. Mají zásady. Asi. Někdy.", c:["#ff5f6d","#3d1450"], ring:true},
+    {n:"Temný Aster", d:"Obří loď padoucha. Taneční souboj jako taktika se překvapivě osvědčil.", c:["#7b5cff","#140a2e"]},
+    {n:"Bitva o Xandar", d:"Velké finále Vol. 1. Tady se z party stává tým.", c:["#ff6ad5","#2a0b52"], ring:true}
+  ]},
+  {name:"Vol. 2", planets:[
+    {n:"Sovereign", d:"Zlatí a dokonalí. Hlavně nic nekrást. Kradlo se.", c:["#ffe08a","#b07a12"], ring:true},
+    {n:"Berhert", d:"Lesní planeta pro nouzové přistání. Hodně nouzové.", c:["#7be38f","#1d4d3a"]},
+    {n:"Contraxia", d:"Ledová planeta s neonovými bary. Ravageři tu slaví.", c:["#9ff3ff","#3b2a8f"]},
+    {n:"Ego, živá planeta", d:"Celá planeta je jeden chlápek. Divné, ale krásné.", c:["#ffb36b","#3f7f6a"], ring:true},
+    {n:"Jádro Ega", d:"Uprostřed planety je mozek. A velký problém.", c:["#ff4f9a","#3a0a2a"]},
+    {n:"Ohňostroj na rozloučenou", d:"Nebe plné barev pro toho, kdo byl opravdu tátou.", c:["#ffd23f","#ff3c78"]},
+    {n:"Nový začátek", d:"Konec Vol. 2. Tým drží spolu víc než kdy dřív.", c:["#5ef2e6","#5a1a8c"], ring:true}
+  ]},
+  {name:"Vol. 3", planets:[
+    {n:"Obnovený Knowhere", d:"Nový domov party. Konečně trochu pořádku.", c:["#ffcf5a","#5a2a7a"]},
+    {n:"Orgocorp", d:"Firemní planeta z masa a kostí. Doslova.", c:["#ff8a8a","#5c1a3a"]},
+    {n:"Protizemě", d:"Planeta jako Země, jen trochu… jiná.", c:["#6ad2ff","#2f6b3a"], ring:true},
+    {n:"Loď Arête", d:"Obří loď šíleného vědce. Pozor na experimenty.", c:["#e6e6ff","#3a3a7a"]},
+    {n:"Laboratoř", d:"Tady se rozhoduje o všem. Zachraň každého.", c:["#9dff9a","#1e3f5a"]},
+    {n:"Útěk", d:"Když se všechno sype, letí se naplno.", c:["#ff9a3c","#45127a"]},
+    {n:"Nový domov", d:"Finále trilogie. Každý našel, kam patří.", c:["#ffffff","#ff6ad5"], ring:true}
+  ]}
+];
+const VOL_H = 2800, STEP = 300;
+const PLANETS = (() => {
+  const out = [];
+  VOLS.forEach((v, li) => v.planets.forEach((p, i) => {
+    const goal = i === 6;
+    out.push(Object.assign({}, p, {li, i, vol:v.name, level: LEVEL_STOPS[i], goal,
+      x: goal ? 0 : Math.round(Math.sin(i * 1.7 + li * 2.1) * 230),
+      y: -(li * VOL_H + (goal ? 2050 : i * STEP)),
+      r: goal ? 210 : 46 + ((i * 37 + li * 13) % 26)}));
+  }));
+  out.push({n:"???", d:"Co je za tím, rozhodneme spolu.", c:["#ffffff","#a970b9"], li:3, i:0, vol:"Vol. 4", level:1, x:0, y:-(3 * VOL_H + 200), r:90, mystery:true});
+  return out;
+})();
+function catmull(p0, p1, p2, p3, t){
+  const t2 = t * t, t3 = t2 * t;
+  return {x: 0.5 * (2*p1.x + (-p0.x + p2.x) * t + (2*p0.x - 5*p1.x + 4*p2.x - p3.x) * t2 + (-p0.x + 3*p1.x - 3*p2.x + p3.x) * t3),
+          y: 0.5 * (2*p1.y + (-p0.y + p2.y) * t + (2*p0.y - 5*p1.y + 4*p2.y - p3.y) * t2 + (-p0.y + 3*p1.y - 3*p2.y + p3.y) * t3)};
+}
+function pathAt(u){ // u = index (float) along PLANETS
+  const n = PLANETS.length, i = Math.max(0, Math.min(n - 2, Math.floor(u))), t = Math.max(0, Math.min(1, u - i));
+  const P = k => PLANETS[Math.max(0, Math.min(n - 1, k))];
+  return catmull(P(i - 1), P(i), P(i + 1), P(i + 2), t);
+}
+function shipParam(){
+  const sc = computeScore(), r = sc.rank, frac = Math.max(0, Math.min(0.999, (sc.total - r.from) / (r.to - r.from)));
+  const league = Math.min(r.league, 2);
+  if (r.league > 2) return {u: PLANETS.length - 2, rank: r};
+  let k = 0; while (k + 1 < LEVEL_STOPS.length && r.n >= LEVEL_STOPS[k + 1]) k++;
+  const span = (k + 1 < LEVEL_STOPS.length ? LEVEL_STOPS[k + 1] : 31) - LEVEL_STOPS[k];
+  const within = Math.min(1, ((r.n - LEVEL_STOPS[k]) + frac) / span);
+  return {u: league * 7 + k + (k === 6 ? 0 : within), rank: r};
+}
+function reachedIdx(u){ return Math.floor(u + 1e-6); }
+function hexRgb(h){ const v = parseInt(h.slice(1), 16); return [v >> 16 & 255, v >> 8 & 255, v & 255]; }
+state.tierRGB = null;
+function tierColor(){
+  const target = hexRgb(currentRank().tierInfo.c);
+  if (!state.tierRGB) state.tierRGB = target.slice();
+  for (let i = 0; i < 3; i++) state.tierRGB[i] += (target[i] - state.tierRGB[i]) * 0.04;
+  return state.tierRGB.map(Math.round);
+}
+
+function drawPlanet(ctx, x, y, R, p, rot, reached, fog){
+  if (fog) {
+    const g = ctx.createRadialGradient(x, y, R * 0.2, x, y, R * 1.6);
+    g.addColorStop(0, "rgba(40,20,60,0.95)"); g.addColorStop(0.65, "rgba(169,112,185,0.25)"); g.addColorStop(1, "rgba(169,112,185,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R * 1.6, 0, 6.283); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 6]);
+    ctx.beginPath(); ctx.arc(x, y, R, 0, 6.283); ctx.stroke(); ctx.setLineDash([]);
+    return;
+  }
+  const [c1, c2] = p.c;
+  const atm = ctx.createRadialGradient(x, y, R * 0.9, x, y, R * 1.45);
+  atm.addColorStop(0, c1 + "88"); atm.addColorStop(1, c1 + "00");
+  ctx.fillStyle = atm; ctx.beginPath(); ctx.arc(x, y, R * 1.45, 0, 6.283); ctx.fill();
+  if (p.ring) { ctx.strokeStyle = c1 + "aa"; ctx.lineWidth = Math.max(2, R * 0.08); ctx.beginPath(); ctx.ellipse(x, y, R * 1.9, R * 0.5, -0.3, Math.PI, 2 * Math.PI); ctx.stroke(); }
+  ctx.save(); ctx.beginPath(); ctx.arc(x, y, R, 0, 6.283); ctx.clip();
+  const g = ctx.createLinearGradient(x - R, y - R, x + R, y + R); g.addColorStop(0, c1); g.addColorStop(1, c2);
+  ctx.fillStyle = g; ctx.fillRect(x - R, y - R, R * 2, R * 2);
+  ctx.globalAlpha = 0.28; ctx.fillStyle = c2;
+  for (let b = -3; b <= 3; b++) { const yy = y + b * R * 0.32 + Math.sin(rot + b) * R * 0.05; ctx.fillRect(x - R, yy, R * 2, R * 0.11); }
+  ctx.globalAlpha = 0.22; ctx.fillStyle = "#000000";
+  for (let k = 0; k < 4; k++) { const a = rot * 0.6 + k * 1.7, cx = x + Math.cos(a) * R * 0.55, cy = y + Math.sin(k * 2.3) * R * 0.45; if (Math.cos(a) > -0.2) { ctx.beginPath(); ctx.arc(cx, cy, R * (0.08 + (k % 2) * 0.05), 0, 6.283); ctx.fill(); } }
+  ctx.globalAlpha = 1;
+  const sh = ctx.createRadialGradient(x - R * 0.45, y - R * 0.45, R * 0.1, x, y, R * 1.05);
+  sh.addColorStop(0, "rgba(255,255,255,0.35)"); sh.addColorStop(0.55, "rgba(0,0,0,0)"); sh.addColorStop(1, "rgba(0,0,0,0.55)");
+  ctx.fillStyle = sh; ctx.fillRect(x - R, y - R, R * 2, R * 2);
+  if (!reached) { ctx.fillStyle = "rgba(10,5,20,0.45)"; ctx.fillRect(x - R, y - R, R * 2, R * 2); }
+  ctx.restore();
+  if (p.ring) { ctx.strokeStyle = c1 + "dd"; ctx.lineWidth = Math.max(2, R * 0.08); ctx.beginPath(); ctx.ellipse(x, y, R * 1.9, R * 0.5, -0.3, 0, Math.PI); ctx.stroke(); }
+}
+
+function drawShip(ctx, x, y, s, ang, rgb){
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(s, s);
+  const fl = 0.75 + 0.25 * Math.sin(starT * 30);
+  const flame = ctx.createLinearGradient(0, 14, 0, 14 + 46 * fl);
+  flame.addColorStop(0, "rgba(255,240,200,1)"); flame.addColorStop(0.35, `rgba(${rgb},0.95)`); flame.addColorStop(1, "rgba(255,90,40,0)");
+  ctx.fillStyle = flame; ctx.beginPath(); ctx.moveTo(-7, 12); ctx.quadraticCurveTo(0, 14 + 52 * fl, 7, 12); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#ffffff"; ctx.strokeStyle = `rgb(${rgb})`; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(0, -30); ctx.quadraticCurveTo(10, -14, 9, 12); ctx.lineTo(-9, 12); ctx.quadraticCurveTo(-10, -14, 0, -30); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = `rgb(${rgb})`;
+  ctx.beginPath(); ctx.moveTo(8, -2); ctx.lineTo(26, 12); ctx.lineTo(24, 18); ctx.lineTo(8, 10); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-8, -2); ctx.lineTo(-26, 12); ctx.lineTo(-24, 18); ctx.lineTo(-8, 10); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#5ef2e6"; ctx.beginPath(); ctx.ellipse(0, -14, 4, 7, 0, 0, 6.283); ctx.fill();
+  ctx.restore();
+}
+
+state.flight = null; state.selPlanet = null; state.prevPlanetIdx = null; state.prevTier = null;
+function drawVoyageWorld(ctx, W, H, cam){
+  const sp = shipParam(), u = sp.u, rgbA = tierColor(), rgb = rgbA.join(","), reach = reachedIdx(u);
+  const curLeague = Math.min(sp.rank.league, 3);
+  const X = wx => cam.x + wx * cam.k, Y = wy => cam.y + wy * cam.k;
+  // flight animation (camera)
+  if (state.flight) {
+    const f = state.flight, t = Math.min(1, (starT - f.t0) / f.dur), e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    const pt = pathAt(f.u0 + (f.u1 - f.u0) * e);
+    state.cam.x = W / 2 - pt.x * state.cam.k; state.cam.y = H * 0.8 - pt.y * state.cam.k;
+    if (t >= 1) state.flight = null;
+  }
+  // path
+  const total = PLANETS.length - 1, seg = 18;
+  ctx.lineCap = "round";
+  ctx.setLineDash([2, 10]); ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 2;
+  ctx.beginPath(); for (let s = 0; s <= total * seg; s++) { const p = pathAt(s / seg); s ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y)); } ctx.stroke(); ctx.setLineDash([]);
+  ctx.save(); ctx.shadowColor = `rgb(${rgb})`; ctx.shadowBlur = 18; ctx.strokeStyle = `rgba(${rgb},0.95)`; ctx.lineWidth = Math.max(3, 7 * cam.k);
+  ctx.beginPath(); const steps = Math.max(2, Math.ceil(u * seg)); for (let s = 0; s <= steps; s++) { const p = pathAt(u * s / steps); s ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y)); } ctx.stroke(); ctx.restore();
+  pathPulses(ctx, u, rgb, X, Y);
+  // vol labels
+  ctx.textAlign = "center";
+  VOLS.forEach((v, li) => {
+    const y = Y(-(li * VOL_H) + 170);
+    ctx.font = `700 ${Math.max(11, 26 * cam.k)}px Righteous, "Segoe UI", sans-serif`;
+    ctx.fillStyle = li <= curLeague ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.3)";
+    ctx.fillText(li <= curLeague ? "AWESOME MIX " + v.name.toUpperCase() : v.name.toUpperCase() + " · ???", X(0), y);
+  });
+  // světlo cíle dopadá na cestu
+  { const gp = PLANETS[Math.min(curLeague, 2) * 7 + 6], gx = X(gp.x), gy = Y(gp.y), sx2 = X(pathAt(u).x), sy2 = Y(pathAt(u).y);
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    const lg = ctx.createLinearGradient(gx, gy, sx2, sy2); lg.addColorStop(0, `rgba(${rgb},0.22)`); lg.addColorStop(1, `rgba(${rgb},0)`);
+    const w1 = gp.r * cam.k * 0.9, w2 = 26 * Math.max(0.6, cam.k);
+    ctx.fillStyle = lg; ctx.beginPath(); ctx.moveTo(gx - w1, gy); ctx.lineTo(gx + w1, gy); ctx.lineTo(sx2 + w2, sy2); ctx.lineTo(sx2 - w2, sy2); ctx.closePath(); ctx.fill();
+    ctx.restore(); }
+  // planets
+  const rot = starT * 0.35;
+  state.hits = [];
+  PLANETS.forEach((p, idx) => {
+    const x = X(p.x), y = Y(p.y), R = p.r * cam.k;
+    if (y < -R * 3 || y > H + R * 3 || x < -R * 3 || x > W + R * 3) return;
+    const reached = idx <= reach, fog = !reached && (p.li > curLeague || p.mystery);
+    if (p.goal && !reached && !fog) {
+      const g = ctx.createRadialGradient(x, y, R * 0.8, x, y, R * 2.4);
+      g.addColorStop(0, `rgba(${rgb},0.35)`); g.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R * 2.4, 0, 6.283); ctx.fill();
+    }
+    if (p.goal && !fog) godRays(ctx, x, y, R, rgb);
+    drawPlanet2(ctx, x, y, R, p, idx, reached, fog);
+    if (reached) { ctx.strokeStyle = `rgba(${rgb},0.9)`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, R + 6, 0, 6.283); ctx.stroke(); }
+    if (idx === reach + 1 && !fog) { const a = 0.5 + 0.5 * Math.sin(starT * 3); ctx.strokeStyle = `rgba(${rgb},${a})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, R + 10 + a * 6, 0, 6.283); ctx.stroke(); }
+    const name = reached ? p.n : "???";
+    ctx.font = `${p.goal ? 700 : 600} ${Math.max(11, (p.goal ? 30 : 17) * cam.k)}px Righteous, "Segoe UI", sans-serif`;
+    ctx.fillStyle = reached ? "#ffffff" : "rgba(255,255,255,0.55)";
+    const ly = y + R + Math.max(14, 26 * cam.k);
+    ctx.fillText(name, x, ly);
+    if (sp.rank && (state.owner || state.showRank) && !p.mystery) { ctx.font = `600 ${Math.max(9, 12 * cam.k)}px "JetBrains Mono", monospace`; ctx.fillStyle = "rgba(255,255,255,0.45)"; ctx.fillText(p.vol + " · level " + p.level, x, ly + Math.max(12, 18 * cam.k)); }
+    state.hits.push({x, y, r: Math.max(R, 18), idx});
+  });
+  // beacons for events along traveled path
+  const ev = state.events || [];
+  ev.forEach((e, i) => {
+    const p = pathAt(u * (i + 1) / (ev.length + 1)), x = X(p.x), y = Y(p.y), a = 0.5 + 0.5 * Math.sin(starT * 2 + i);
+    ctx.fillStyle = `rgba(${rgb},${0.4 + 0.6 * a})`; ctx.beginPath(); ctx.arc(x, y, 4 + 3 * a, 0, 6.283); ctx.fill();
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(x, y, 2, 0, 6.283); ctx.fill();
+  });
+  // ship + trail
+  const sp0 = pathAt(u), sp1 = pathAt(Math.min(total, u + 0.02)), ang = Math.atan2(sp1.y - sp0.y, sp1.x - sp0.x) + Math.PI / 2;
+  engineSparks(ctx, sp0.x, sp0.y, isFinite(ang) ? ang : 0, Math.max(0.6, cam.k * 1.3), rgb, X, Y, cam);
+  drawShip(ctx, X(sp0.x), Y(sp0.y) + Math.sin(starT * 2.2) * 3, Math.max(0.6, cam.k * 1.3), isFinite(ang) ? ang : 0, rgb);
+  ctx.font = `700 ${Math.max(11, 15 * cam.k)}px Righteous, "Segoe UI", sans-serif`; ctx.fillStyle = "#ffffff";
+  ctx.fillText("AUTACI", X(sp0.x) + 44 * Math.max(0.6, cam.k), Y(sp0.y) + 4);
+  state.shipScreen = {x: X(sp0.x), y: Y(sp0.y)};
+  // arrivals / tier changes
+  if (state.treeLoaded && state.loaded.tasks && state.loaded.subs) {
+    const tierKey = sp.rank.league + ":" + sp.rank.tier;
+    if (state.prevPlanetIdx != null && reach > state.prevPlanetIdx) announce("Přistáli jste", PLANETS[reach].n);
+    else if (state.prevTier != null && tierKey !== state.prevTier) announce("Nová úroveň", sp.rank.tierInfo.name);
+    state.prevPlanetIdx = reach; state.prevTier = tierKey;
+  }
+  const box = $("space"); if (box) box.style.setProperty("--tierc", `rgb(${rgb})`);
+}
+function announce(a, b){
+  const el2 = $("arrival"); if (!el2) return;
+  el2.replaceChildren(el("small", {text:a}), el("b", {text:b}));
+  el2.hidden = false; el2.classList.remove("show"); void el2.offsetWidth; el2.classList.add("show");
+  clearTimeout(announce._t); announce._t = setTimeout(() => { el2.hidden = true; }, 4200);
+}
+function shipHomeCam(fly){
+  const sp = $("space"); if (!sp) return;
+  const W = sp.clientWidth || 800, H = sp.clientHeight || 600;
+  const s = shipParam(), ship = pathAt(s.u), league = Math.min(s.rank.league, 2), goal = PLANETS[league * 7 + 6];
+  const dist = Math.abs(ship.y - goal.y) + goal.r + 260;
+  const k = Math.max(0.22, Math.min(0.75, H * 0.8 / dist));
+  state.cam = {x: W / 2 - ship.x * k, y: H * 0.8 - ship.y * k, k};
+  if (sp.clientWidth) state.camHomed = true;
+  if (fly && !STILL && s.u > 0.3) state.flight = {t0: starT, dur: 2.6, u0: Math.max(0, league * 7 - 0.0), u1: s.u};
+  else if (fly && !STILL) state.flight = {t0: starT, dur: 1.6, u0: Math.max(0, s.u - 0.9), u1: s.u};
+  applyCam();
+}
+function planetCard(idx){
+  const card = $("planetCard"); if (!card) return;
+  if (idx == null) { card.hidden = true; return; }
+  const p = PLANETS[idx], reach = reachedIdx(shipParam().u), reached = idx <= reach;
+  card.hidden = false;
+  card.replaceChildren(el("button", {type:"button", class:"pc-x", "aria-label":"Zavřít", onclick:()=>{ state.selPlanet = null; planetCard(null); }, text:"×"}),
+    el("small", {text: p.vol + (p.mystery ? "" : " · od levelu " + p.level)}),
+    el("b", {text: reached ? p.n : "???"}),
+    el("p", {text: reached ? p.d : p.mystery ? "Co je za tím, zatím nikdo neví." : "Zahaleno mlhou. Doleťte sem a uvidíte."}));
+}
+
+// přepisuje starší funkce mapy (pozdější deklarace má přednost)
+function homeCam(){ shipHomeCam(false); }
+function startWarp(){ if (state.cam) shipHomeCam(true); }
+function renderQuests(){
+  const box = $("quests"); if (!box) return;
+  const kids = [el("h3", {text:"Výpravy"}), el("p", {text: state.nodes.length ? "Velké cíle týmu. Za splněný cíl je 250 bodů." : "Zatím žádné výpravy."})];
+  const list = el("div", {class:"quest-list"});
+  for (const n of state.nodes) {
+    const st = nodeState(n);
+    list.append(el("button", {type:"button", class:"quest " + st + (state.selNode === n.id ? " sel" : ""), onclick:()=>{ state.selNode = n.id; state.confirmNode = false; renderQuests(); renderPanel(); }},
+      el("span", {class:"q-dot", text: st === "done" ? "✓" : st === "ready" ? "+" : "✕"}), el("span", {class:"q-t", text:n.title})));
+  }
+  if (mgr() && state.db) list.append(el("button", {type:"button", class:"quest add", onclick:()=>{ state.selNode = ROOT_ID; state.confirmNode = false; renderQuests(); renderPanel(); }}, el("span", {class:"q-dot", text:"+"}), el("span", {class:"q-t", text:"Nová výprava"})));
+  kids.push(list); box.replaceChildren(...kids);
+}
+function renderTree(){
+  setupSpace();
+  const sp = $("space");
+  if (sp && !sp.dataset.voyage) {
+    sp.dataset.voyage = "1";
+    sp.addEventListener("click", e => {
+      const r = sp.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const hit = (state.hits || []).find(h => Math.hypot(h.x - x, h.y - y) <= h.r + 8);
+      if (hit) { state.selPlanet = hit.idx; planetCard(hit.idx); }
+    });
+  }
+  if (!state.camHomed) shipHomeCam(false); else applyCam();
+  renderLevel(); renderQuests(); renderPanel(); renderJournal();
+}
+
+// ---- Epická samota: vzdálená galaxie (nehybná), světlo cíle, filmový obraz ----
+function drawDistantGalaxy(ctx, W, H){
+  const R = Math.max(W, H) * 0.55, x = W * 0.78, y = H * 0.22, rot = 0.6;
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  const core = ctx.createRadialGradient(x, y, 0, x, y, R * 0.35);
+  core.addColorStop(0, "rgba(255,235,250,0.32)"); core.addColorStop(0.4, "rgba(201,155,216,0.12)"); core.addColorStop(1, "rgba(169,112,185,0)");
+  ctx.fillStyle = core; ctx.beginPath(); ctx.ellipse(x, y, R * 0.35, R * 0.16, rot, 0, 6.283); ctx.fill();
+  const cs = Math.cos(rot), sn = Math.sin(rot);
+  for (const p of GALAXY_PTS) {
+    const px = p.x * R, py = p.y * R * 0.38, gx = x + px * cs - py * sn, gy = y + px * sn + py * cs;
+    ctx.globalAlpha = 0.18 + 0.12 * (1 - Math.hypot(p.x, p.y)); ctx.fillStyle = p.c; ctx.fillRect(gx, gy, 1.3, 1.3);
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+function drawCinema(ctx, W, H){
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "rgba(0,0,0,0.55)"); g.addColorStop(0.12, "rgba(0,0,0,0)"); g.addColorStop(0.88, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.6)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+
+// ---- Schránka (jen owner): co kdo udělal ----
+function inboxItems(){
+  const out = [], all = state.membersAll || {};
+  for (const [uid, m] of Object.entries(all)) {
+    if (uid === state.uid) continue;
+    const raw = state.membersRaw[uid] || {}, name = m.name || "Někdo";
+    if (m.joinedAt > 1e12) out.push({at: m.joinedAt, kind:"join", who:name, title:"se připojil k týmu"});
+    for (const [tid, it] of Object.entries(raw.items || {})) {
+      if (!it || !it.submittedAt) continue;
+      const t = state.tasks.find(x => x.id === tid); if (!t) continue;
+      if (it.text) out.push({at: it.submittedAt, kind:"sub", who:name, title:"odevzdal úkol", task:t.title, text:it.text});
+      else if (it.done) out.push({at: it.submittedAt, kind:"done", who:name, title:"splnil úkol", task:t.title});
+    }
+    for (const w of (Array.isArray(raw.works) ? raw.works : [])) if (w && w.addedAt) out.push({at: w.addedAt, kind:"work", who:name, title:"přidal do portfolia", task:w.title, url:w.url});
+  }
+  return out.sort((a, b) => b.at - a.at).slice(0, 120);
+}
+function renderInbox(){
+  const tab = $("tab-schranka"), box = $("inbox");
+  if (tab) tab.hidden = !state.owner;
+  if (!state.owner || !box) return;
+  const seen = (state.myDoc && state.myDoc.inboxSeenAt) || 0, items = inboxItems(), unread = items.filter(i => i.at > seen).length;
+  const badge = $("inbox-n"); badge.hidden = !unread; badge.textContent = unread;
+  const head = el("div", {class:"panel inbox-head"}, el("h3", {text:"Schránka"}),
+    el("p", {text: unread ? unread + (unread === 1 ? " nová zpráva" : unread < 5 ? " nové zprávy" : " nových zpráv") : "Nic nového. Všechno máš přečtené."}));
+  if (unread && state.db && state.myDoc) head.append(el("div", {class:"btns"}, el("button", {type:"button", class:"primary", onclick:()=>saveMyDoc({inboxSeenAt: Date.now()}, "Vše přečteno"), text:"Označit vše jako přečtené"})));
+  const list = el("ul", {class:"inbox-list"});
+  if (!items.length) list.append(el("li", {class:"m-empty", text:"Až kluci něco odevzdají, splní nebo přidají do portfolia, uvidíš to tady."}));
+  for (const i of items) {
+    const li = el("li", {class:"inbox-item " + i.kind + (i.at > seen ? " unread" : "")},
+      el("span", {class:"ib-dot", "aria-hidden":"true"}),
+      el("div", {class:"ib-body"},
+        el("div", {class:"ib-line"}, el("b", {text:i.who}), " " + i.title + (i.task ? ": " : ""), i.task ? el("span", {class:"ib-task", text:i.task}) : null),
+        i.text ? el("div", {class:"ib-text", text: i.text.length > 220 ? i.text.slice(0, 219) + "…" : i.text}) : null,
+        i.url && /^https?:\/\//i.test(i.url) ? el("a", {href:i.url, target:"_blank", rel:"noopener noreferrer", class:"ib-link", text:i.url}) : null,
+        el("small", {text: new Date(i.at).toLocaleString("cs-CZ", {day:"numeric", month:"numeric", hour:"2-digit", minute:"2-digit"})})));
+    list.append(li);
+  }
+  box.replaceChildren(head, list);
+}
+
+function showView(){
+  let v = location.hash === "#cesta" ? "cesta" : location.hash === "#tym" ? "tym" : location.hash === "#sprava" ? "sprava" : location.hash === "#schranka" ? "schranka" : "ukoly";
+  if ((v === "sprava" || v === "schranka") && !state.owner) v = "ukoly";
+  for (const k of ["ukoly","cesta","tym","schranka","sprava"]) { $("view-"+k).hidden = v !== k; $("tab-"+k).setAttribute("aria-current", v === k ? "page" : "false"); }
+  if (v === "cesta") requestAnimationFrame(() => { if (!state.camHomed) homeCam(); else drawStars(); startWarp(); });
+}
+window.addEventListener("hashchange", showView);
+showView();
+renderTree();
+
+render();
+
+(async () => {
+  const claudeApi = window.claude;
+  const [db, user] = claudeApi ? await Promise.all([claudeApi.use("db"), claudeApi.use("user")]) : [null, null];
+  if (!db) { $("status").textContent = "Úkoly se nepodařilo načíst. Přihlas se a zkus to znovu."; return; }
+  state.db = db;
+  state.owner = user ? !!(await user.isOwner()) : false;
+  state.uid = user ? await user.id() : null;
+  setupJoin();
+  if (state.owner) $("join-code-wrap").hidden = true;
+  $("f-active").addEventListener("click", () => { state.folder = "active"; render(); });
+  $("f-done").addEventListener("click", () => { state.folder = "done"; render(); });
+  showView();
+  const timer = setTimeout(() => { if (!state.loaded.tasks) $("status").textContent = "Úkoly se zatím nedaří načíst. Zkontroluj připojení."; }, 10000);
+  const watch = (col, fn, flag) => db.collection(col).onSnapshot(snap => {
+    fn(snap); state.loaded[flag] = true;
+    if (flag === "tasks") clearTimeout(timer);
+    render();
+  }, () => { clearTimeout(timer); state.loaded[flag] = true; if (!state.myDoc) { render(); return; } $("status").hidden = false; $("status").textContent = "Spojení s úkoly se přerušilo. Načti stránku znovu."; });
+  watch("tasks", s => { state.tasks = s.docs.map(d => ({id:d.id, ...d.data()})); }, "tasks");
+  watch("subs", s => {
+    const subs = {}, members = {}, membersRaw = {}, membersAll = {}; let mine = null;
+    for (const d of s.docs) {
+      const data = d.data() || {};
+      if (d.id === state.uid) mine = data;
+      if (!data.name) continue;
+      membersRaw[d.id] = data;
+      membersAll[d.id] = {name: String(data.name).slice(0, 40), boss: !!data.boss, joinedAt: data.joinedAt || 0};
+      if (data.removed) continue;
+      members[d.id] = {name: String(data.name).slice(0, 40), boss: !!data.boss, joinedAt: data.joinedAt || 0};
+      for (const [tid, it] of Object.entries(data.items || {})) subs[key(tid, d.id)] = it;
+    }
+    state.subs = subs; state.members = members; state.membersRaw = membersRaw; state.membersAll = membersAll; if (mine && mine.removed) state.readOnly = true; state.myDoc = mine && mine.name ? mine : null;
+  }, "subs");
+  db.doc("tree/state").onSnapshot(s => { const d = s.exists ? s.data() : null; state.tree = (d && d.done) || {}; state.nodes = (d && Array.isArray(d.nodes)) ? d.nodes : []; state.rank = (d && d.rank) || 1; state.treeLoaded = true; render(); }, () => {});
+  watch("events", s => { state.events = s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => (a.date||"").localeCompare(b.date||"") || (a.createdAt||0)-(b.createdAt||0)); }, "events");
+  watch("requests", s => { state.requests = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); }, "requests");
+  db.doc("roles/map").onSnapshot(s => { const d = s.exists ? s.data() : null; state.roles = (d && d.r) || {}; state.showRank = !!(d && d.showRank); render(); }, () => {});
+  watch("reviews", s => { state.reviews = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); }, "reviews");
+})();
+</script>
+
+</body>
+</html>
