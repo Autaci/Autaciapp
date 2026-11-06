@@ -342,7 +342,8 @@ select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px
 .quest.ready .q-dot{background:var(--accent-soft);color:var(--accent)}
 .quest.sel{border-color:var(--ink)}
 .quest.add{border-style:dashed}
-#active .task{border:2px solid var(--brand);box-shadow:0 6px 22px rgba(169,112,185,.18),0 0 0 4px rgba(169,112,185,.08)}
+#active .task{border:2px solid #1f78b4;box-shadow:0 6px 22px rgba(31,120,180,.16),0 0 0 4px rgba(31,120,180,.07)}
+#active .task.sent,#done .task{border:2px solid var(--ok);box-shadow:0 6px 22px rgba(79,125,87,.18),0 0 0 4px rgba(79,125,87,.08)}
 #active .task.mine{border-color:#1f78b4;box-shadow:0 6px 22px rgba(31,120,180,.22),0 0 0 4px rgba(31,120,180,.1)}
 .flags{display:flex;gap:6px;flex-wrap:wrap;padding:12px 18px 0}
 .flag{font:700 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:6px 10px;border-radius:6px}
@@ -354,7 +355,7 @@ select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px
 .folders button span{font:700 12px var(--mono);background:var(--sunk);color:var(--muted);border-radius:99px;padding:3px 8px}
 .folders button[aria-pressed="true"]{background:var(--ink);color:#ffffff;border-color:var(--ink)}
 .folders button[aria-pressed="true"] span{background:#ffffff;color:#000000}
-#done .task{border:1px solid var(--line)}
+
 .tabs{flex-wrap:wrap}
 .tab-badge{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;margin-left:4px;border-radius:99px;background:#1f78b4;color:#ffffff;font:700 11px var(--mono)}
 .inbox-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
@@ -739,7 +740,8 @@ function taskCard(t){
   const people = assigneesOf(t);
   const isMineTodo = !done && state.uid && people.includes(state.uid) && personState(t, state.uid) !== "ok";
   const isLate = !done && t.due && daysLeft(t.due) < 0;
-  return el("article", {class:"task" + (isLate ? " late" : isMineTodo ? " mine" : "")},
+  const mineSent = !done && state.uid && people.includes(state.uid) && personState(t, state.uid) === "ok";
+  return el("article", {class:"task" + (mineSent ? " sent" : isLate ? " late" : isMineTodo ? " mine" : "")},
     (() => {
       const mineTodo = !done && state.uid && people.includes(state.uid) && personState(t, state.uid) !== "ok";
       const fresh = !done && Date.now() - (t.createdAt || 0) < 3 * 86400000;
