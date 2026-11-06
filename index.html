@@ -37,7 +37,7 @@ window.__standalone = true;
 (function(){
   firebase.initializeApp(firebaseConfig);
   const fdb = firebase.firestore(), auth = firebase.auth();
-  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+  try { auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {}); } catch (e) {}
   let resolveReady; const ready = new Promise(r => resolveReady = r);
   const randomCode = () => Array.from({length: 6}, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
   function showLogin(msg){
@@ -55,6 +55,7 @@ window.__standalone = true;
   auth.onAuthStateChanged(async u => {
     if (!u) { showLogin(); return; }
     document.getElementById("login").hidden = true;
+    window.__userEmail = u.email || "";
     const ref = fdb.doc("config/app");
     let cfg = null;
     try { const s = await ref.get(); cfg = s.exists ? s.data() : null; } catch (e) { showLogin("Nedaří se spojit s databází. Zkontroluj nastavení Firestore (krok 4)."); return; }
@@ -375,6 +376,7 @@ select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px
 .task-del.confirm{justify-content:space-between;background:var(--bad-soft)}
 .task-del.confirm span{font-weight:600;color:var(--bad)}
 .join-code{margin:0;font-size:15px}.join-code b{font:700 18px var(--mono);letter-spacing:.12em;background:var(--accent-soft);padding:2px 8px;border-radius:6px}
+.acct-hint{margin:0 0 6px;color:#5b5560;font-size:14px}.acct-mail{display:block;color:#5b5560}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
 .legend span{display:flex;align-items:center;gap:6px}
 .legend i{width:14px;height:14px;border-radius:50%;display:inline-block}
@@ -404,6 +406,7 @@ select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px
 
   <section class="new" id="join" hidden>
     <h2>Připoj se k týmu Autaci</h2>
+    <p class="acct-hint" id="acct-hint"></p>
     <form id="joinForm" class="form">
       <label class="lbl" for="join-name">Tvoje jméno
         <input type="text" id="join-name" maxlength="24" placeholder="Jak ti máme říkat" required>
@@ -549,8 +552,11 @@ async function saveItem(taskId, item){
 function renderWho(){
   const w = $("who");
   const me = state.myDoc && state.myDoc.name;
-  if (me) { w.replaceChildren(el("span", {text:"Přihlášený jako"}), el("span", {class:"chip", "aria-pressed":"true", text:me})); }
+  if (me) { w.replaceChildren(el("span", {text:"Přihlášený jako"}), el("span", {class:"chip", "aria-pressed":"true", text:me, title: window.__userEmail || ""})); }
   else w.replaceChildren();
+  const hint = $("acct-hint");
+  if (hint) hint.replaceChildren("Jsi přihlášený jako ", el("b", {text: window.__userEmail || "?"}), ". Vždycky se přihlašuj tímhle účtem. S jiným účtem by vznikl nový prázdný profil bez tvé historie.");
+  if (me && window.__userEmail && state.myDoc.email !== window.__userEmail && !state.emailSynced) { state.emailSynced = true; state.db.doc("subs/"+state.uid).update({email: window.__userEmail}).catch(() => {}); }
   const box = $("join");
   const show = !!(state.db && state.uid && state.loaded.subs && !me && !state.readOnly);
   box.hidden = !show;
@@ -567,7 +573,7 @@ function setupJoin(){
     try {
       const code = ($("join-code").value || "").trim().toUpperCase();
       if (!state.owner && !code) { toast("Napiš kód týmu"); $("join-submit").disabled = false; return; }
-      await state.db.doc("subs/"+state.uid).set({name, boss: state.owner, joinedAt: Date.now(), items: {}, code});
+      await state.db.doc("subs/"+state.uid).set({name, boss: state.owner, joinedAt: Date.now(), items: {}, code, email: window.__userEmail || ""});
       toast("Vítej, " + name);
       setTimeout(() => location.reload(), 700);
     } catch(e){ if (e && e.code === "permission-denied") toast("Špatný kód týmu. Zeptej se ownera."); else handleWriteError(e); }
@@ -1607,7 +1613,7 @@ function renderAdmin(){
   for (const uid of all) {
     const m = state.membersAll[uid], raw = state.membersRaw[uid] || {};
     const row = el("div", {class:"admin-row"+(raw.removed ? " removed" : "")});
-    row.append(el("div", {class:"admin-name"}, el("b", null, m.name, m.boss ? el("span", {class:"cap", text:"owner"}) : null), el("small", {text: raw.removed ? "Odebraný z týmu" : (m.joinedAt > 1e12 ? "V týmu od " + new Date(m.joinedAt).toLocaleDateString("cs-CZ") : "")})));
+    row.append(el("div", {class:"admin-name"}, el("b", null, m.name, m.boss ? el("span", {class:"cap", text:"owner"}) : null), el("small", {text: raw.removed ? "Odebraný z týmu" : (m.joinedAt > 1e12 ? "V týmu od " + new Date(m.joinedAt).toLocaleDateString("cs-CZ") : "")}), raw.email ? el("small", {class:"acct-mail", text: raw.email}) : null));
     if (m.boss) { row.append(el("span", {class:"pill ok", text:"Owner"})); kids.push(row); continue; }
     const id = "role-" + uid;
     const sel = el("select", {id, "aria-label":"Role pro " + m.name, disabled: raw.removed ? true : null});
