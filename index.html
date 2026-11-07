@@ -2342,7 +2342,7 @@ async function runOndraPlan(){
   ONDRA_PLAN.forEach(([w, title, detail, weight, needs], i) => {
     const id = "plan-ondra-" + w + "-" + i;
     if (made.has(id) || state.tasks.some(t => t.id === id)) return;
-    const start = planWeekStart(w); if (start > now) return;
+    const start = planWeekStart(w); if (start.getTime() - (w === 1 ? 3 * 86400000 : 0) > now.getTime()) return; // 1. týden se ukáže už od pátku
     const sun = new Date(start); sun.setDate(sun.getDate() + 6);
     if (sun < new Date(now.getFullYear(), now.getMonth(), now.getDate())) { made.add(id); return; } // propásnutý týden už nezadávat
     fresh.push({id, task: {title, detail, due: isoOf(sun.getTime()), assignees: [uid], visibleTo: [uid], needsSubmission: needs, weight, toJourney: true, createdBy: "plan", plan: "ondra", week: w, createdAt: Date.now()}});
