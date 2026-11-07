@@ -860,6 +860,7 @@ function render(){
   renderAdmin();
   renderInbox();
   autoJourney();
+  runOndraPlan();
 }
 
 function handleWriteError(e){
@@ -2280,6 +2281,83 @@ function renderTree(){
   const j = $("journal"); if (j) { j.hidden = !(mgr() && state.db); const h = j.querySelector("h3"); if (h) h.textContent = "Zapsat událost na cestu"; }
 }
 
+// ---- Automatický plán pro Ondru: automatizace a AI pro malé firmy (fáze 1 a 2) ----
+// Každé pondělí appka (u ownera nebo moderátora) sama zadá Ondrovi úkoly na týden s termínem do neděle.
+const PLAN_START = "2026-11-09"; // pondělí 1. týdne
+const EN = " Každý den k tomu 20 minut angličtiny (dokumentace nebo technické video bez titulků).";
+const ONDRA_PLAN = [
+  // [týden, název, podrobnosti, obtížnost, odevzdat]
+  [1, "Python 1: první kroky", "Projdi kurz CS50P (zdarma, Harvard): lekce 0 a 1 (funkce, proměnné, podmínky). Kód piš sám, AI ať ti ho jen vysvětluje." + EN, "standard", false],
+  [1, "GitHub a první 2 skripty", "Založ si účet na GitHubu a repozitář na projekty. Nahraj tam 2 vlastní skripty z lekcí. Odevzdej odkaz.", "standard", true],
+  [2, "Python 2: cykly a chyby", "CS50P lekce 2 a 3 (cykly, výjimky)." + EN, "standard", false],
+  [2, "5 krátkých skriptů", "Na GitHubu měj 5 krátkých skriptů, mezi nimi hromadné přejmenování souborů ve složce. Odevzdej odkaz.", "narocny", true],
+  [3, "Data: CSV a JSON", "Nauč se v Pythonu číst a zapisovat CSV a JSON (CS50P lekce 6)." + EN, "standard", false],
+  [3, "Skript na souhrn z tabulky", "Skript, který načte CSV (třeba export objednávek) a vypíše souhrn: počet, součet, průměr. Odevzdej odkaz.", "standard", true],
+  [4, "pandas a základy SQL", "Nauč se knihovnu pandas a základní SQL dotazy (SELECT, WHERE, GROUP BY)." + EN, "standard", false],
+  [4, "Kontrola: sloučení dvou exportů", "KONTROLNÍ BOD: bez návodu napiš skript (asi 50 řádků), který sloučí dva CSV exporty a vytvoří souhrn. Odevzdej odkaz.", "narocny", true],
+  [5, "API: požadavek a odpověď", "Pochop, jak funguje API: požadavek, odpověď, knihovna requests, čtení dokumentace." + EN, "standard", false],
+  [5, "Údaje o firmě z ARES", "Skript, který podle IČO stáhne údaje o firmě z registru ARES (název, adresa). Odevzdej odkaz.", "standard", true],
+  [6, "API: přihlašování a dokumentace", "Nauč se API klíče a autentizaci, zkus API Google Sheets." + EN, "standard", false],
+  [6, "ARES do tabulky", "Rozšiř skript: seznam IČO, údaje z ARES a zápis do Google tabulky nebo CSV. Odevzdej odkaz.", "narocny", true],
+  [7, "n8n nebo Make: základy", "Vyber si n8n nebo Make (zdarma). Projdi spouštěče a webhooky (Make Academy nebo dokumentace n8n)." + EN, "standard", false],
+  [7, "První automatizace", "Scénář: vyplněný formulář pošle e-mail. Odevzdej screenshot scénáře.", "standard", true],
+  [8, "Větvení a ošetření chyb", "V n8n nebo Make se nauč větvení (když… tak…) a co dělat, když něco selže." + EN, "standard", false],
+  [8, "Kontrola: 3 služby propojené", "KONTROLNÍ BOD: nový řádek v tabulce spustí e-mail a zápis do dalšího systému, a když něco selže, dá vědět. Odevzdej screenshot nebo video.", "narocny", true],
+  [9, "AI přes API", "Volání jazykového modelu z Pythonu: zadání (prompt) a strukturovaný výstup (JSON). Nastav si limit útraty." + EN, "standard", false],
+  [9, "Třídění zpráv pomocí AI", "Skript, který roztřídí e-maily nebo zprávy na poptávka, dotaz a spam. Odevzdej odkaz.", "standard", true],
+  [10, "AI a dokumenty", "Nauč se dostat text z PDF a předat ho modelu." + EN, "standard", false],
+  [10, "Vytěžení faktury z PDF", "Nástroj, který z PDF faktury vytáhne dodavatele, částku a splatnost a zapíše je do tabulky. Odevzdej odkaz.", "narocny", true],
+  [11, "Velký projekt 1/2: poptávky z webu", "Souhrnný projekt: poptávka z webového formuláře se automaticky roztřídí pomocí AI. Hodí se k webům, které děláš." + EN, "narocny", false],
+  [11, "Velký projekt 2/2: odpověď a tabulka", "Dokonči projekt: AI navrhne odpověď a poptávka se zapíše do tabulky. Odevzdej odkaz a krátké video.", "narocny", true],
+  [12, "Portfolio na GitHubu", "Ke všem projektům napiš README: co řeší a jak se spouští." + EN, "standard", false],
+  [12, "Kontrola: 10 projektů", "KONTROLNÍ BOD: na GitHubu máš 10 funkčních projektů. Ukaž týmu ten nejlepší. Odevzdej odkaz.", "boss", true],
+  [13, "Seznam 10 firem s ruční prací", "Rodina, známí, místní firmy (autoservis, účetní, penzion, spolek). Hledej ruční práci, která se opakuje aspoň jednou týdně a zabere přes hodinu. Odevzdej seznam.", "standard", true],
+  [13, "Otázky na rozhovor", "Připrav si otázky na 30minutový rozhovor: jak proces vypadá dnes, kdo ho dělá a jak dlouho trvá.", "rychla", false],
+  [14, "3 rozhovory s firmami", "Udělej 3 rozhovory. U každé firmy si zapiš, kolik času ruční práce zabere. Odevzdej poznámky.", "narocny", true],
+  [14, "Vyber projekt č. 1", "Vyber nejlepší příležitost a změř výchozí stav (kolik hodin týdně). Odevzdej číslo.", "standard", true],
+  [15, "Projekt 1: stavba", "Postav první verzi. S daty firmy zacházej opatrně, osobní údaje neposílej do nástrojů bez smluv.", "narocny", false],
+  [16, "Projekt 1: předání", "Dodej funkční verzi a nech ji běžet. Odevzdej popis řešení.", "boss", true],
+  [17, "Projekt 2: rozhovor a výchozí stav", "Druhá firma: rozhovor a změřený výchozí stav. Odevzdej číslo.", "standard", true],
+  [18, "Projekt 2: stavba", "Postav první verzi projektu 2.", "narocny", false],
+  [19, "Projekt 2: předání", "Dodej funkční verzi a nech ji běžet. Odevzdej popis řešení.", "boss", true],
+  [20, "Projekt 1: výsledek a reference", "Po měsíci změř výsledek projektu 1 a požádej o písemnou referenci. Odevzdej číslo a referenci.", "standard", true],
+  [20, "Případová studie 1", "Na jednu stránku: problém, řešení, číslo, citace klienta. Odevzdej odkaz nebo text.", "standard", true],
+  [21, "Projekt 3: rozhovor a výchozí stav", "Třetí firma: rozhovor a změřený výchozí stav. Odevzdej číslo.", "standard", true],
+  [22, "Projekt 3: stavba", "Postav první verzi projektu 3.", "narocny", false],
+  [23, "Projekt 3: předání", "Dodej funkční verzi a nech ji běžet. Odevzdej popis řešení.", "boss", true],
+  [24, "Projekt 2: výsledek a studie", "Změř výsledek projektu 2, získej referenci a napiš případovou studii 2.", "narocny", true],
+  [25, "Projekt 3: výsledek a studie", "Změř výsledek projektu 3, získej referenci a napiš případovou studii 3.", "narocny", true],
+  [26, "Kontrola: 3 případové studie na webu", "KONTROLNÍ BOD: 3 případové studie s čísly a 3 reference na webu Autaci nebo LinkedInu. Pak začínají placené zakázky.", "boss", true],
+];
+function planWeekStart(w){ const [y, m, d] = PLAN_START.split("-").map(Number); return new Date(y, m - 1, d + (w - 1) * 7); }
+function ondraUid(){
+  for (const [uid, m] of Object.entries(state.members || {})) if (m && !m.boss && /ondr|pavli/i.test(m.name || "")) return uid;
+  return null;
+}
+async function runOndraPlan(){
+  if (state.planBusy || !mgr() || !state.db || !state.loaded.tasks || !state.loaded.subs || !state.loaded.events) return;
+  const uid = ondraUid(); if (!uid) return;
+  const made = new Set((state.planDoc && state.planDoc.made) || []);
+  const now = new Date(), fresh = [];
+  ONDRA_PLAN.forEach(([w, title, detail, weight, needs], i) => {
+    const id = "plan-ondra-" + w + "-" + i;
+    if (made.has(id) || state.tasks.some(t => t.id === id)) return;
+    const start = planWeekStart(w); if (start > now) return;
+    const sun = new Date(start); sun.setDate(sun.getDate() + 6);
+    if (sun < new Date(now.getFullYear(), now.getMonth(), now.getDate())) { made.add(id); return; } // propásnutý týden už nezadávat
+    fresh.push({id, task: {title, detail, due: isoOf(sun.getTime()), assignees: [uid], visibleTo: [uid], needsSubmission: needs, weight, toJourney: true, createdBy: "plan", plan: "ondra", week: w, createdAt: Date.now()}});
+  });
+  const changed = fresh.length || made.size !== ((state.planDoc && state.planDoc.made) || []).length;
+  if (!changed) return;
+  state.planBusy = true;
+  try {
+    for (const f of fresh) { await state.db.doc("tasks/" + f.id).set(f.task); made.add(f.id); }
+    await state.db.doc("events/plan-ondra").set({made: [...made], updatedAt: Date.now()});
+    if (fresh.length) toast("Ondrovi přibyly úkoly z jeho plánu: " + fresh.length);
+  } catch(e) { /* zkusí se příště */ }
+  state.planBusy = false;
+}
+
 // ---- Schránka (jen owner): co kdo udělal ----
 function inboxItems(){
   const out = [], all = state.membersAll || {};
@@ -2367,7 +2445,7 @@ render();
     state.subs = subs; state.members = members; state.membersRaw = membersRaw; state.membersAll = membersAll; if (mine && mine.removed) state.readOnly = true; state.myDoc = mine && mine.name ? mine : null;
   }, "subs");
   db.doc("tree/state").onSnapshot(s => { const d = s.exists ? s.data() : null; state.tree = (d && d.done) || {}; state.nodes = (d && Array.isArray(d.nodes)) ? d.nodes : []; state.rank = (d && d.rank) || 1; state.treeLoaded = true; render(); }, () => {});
-  watch("events", s => { state.events = s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => (a.date||"").localeCompare(b.date||"") || (a.createdAt||0)-(b.createdAt||0)); }, "events");
+  watch("events", s => { const pd = s.docs.find(d => d.id === "plan-ondra"); state.planDoc = pd ? pd.data() : null; state.events = s.docs.filter(d => !d.id.startsWith("plan-")).map(d => ({id:d.id, ...d.data()})).sort((a,b) => (a.date||"").localeCompare(b.date||"") || (a.createdAt||0)-(b.createdAt||0)); }, "events");
   watch("requests", s => { state.requests = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); }, "requests");
   db.doc("roles/map").onSnapshot(s => { const d = s.exists ? s.data() : null; state.roles = (d && d.r) || {}; state.showRank = !!(d && d.showRank); render(); }, () => {});
   watch("reviews", s => { state.reviews = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); }, "reviews");
