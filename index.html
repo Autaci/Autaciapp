@@ -376,6 +376,43 @@ select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px
 .task-del{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 18px 12px;border-top:1px solid var(--line)}
 .task-del.confirm{justify-content:space-between;background:var(--bad-soft)}
 .task-del.confirm span{font-weight:600;color:var(--bad)}
+#view-cesta>.legend,#view-cesta .space{display:none!important}
+#journal .journal-list{display:none}
+.road-box{display:flex;flex-direction:column;gap:18px}
+.road-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.rs{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;background:var(--surface)}
+.rs b{font:800 26px/1 var(--display)}.rs span{font-size:13px;color:var(--muted)}
+.road-goals{display:grid;gap:10px}
+.road-goal{text-align:left;display:flex;flex-direction:column;gap:4px;border:2px solid var(--brand);border-radius:14px;padding:14px 16px;background:var(--accent-soft,#f4ecf7);cursor:pointer;font:inherit;color:inherit}
+.road-goal.sel{box-shadow:0 0 0 3px rgba(169,112,185,.25)}
+.road-goal small{font:700 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.road-goal b{font:800 20px/1.2 var(--display)}.rg-desc{font-size:14px;color:var(--muted)}
+.rg-due{align-self:flex-start;margin-top:4px;font:700 12.5px var(--mono);padding:4px 8px;border-radius:6px;background:#fff;border:1px solid var(--line)}
+.rg-due.soon{background:#fff4e0;border-color:#e3b25c}.rg-due.late{background:#fdecee;border-color:#c62828;color:#c62828}
+.road-h{margin:4px 0 0}
+.road{list-style:none;margin:0;padding:0 0 0 4px;position:relative}
+.road::before{content:"";position:absolute;left:15px;top:14px;bottom:44px;width:3px;border-radius:3px;background:var(--ok)}
+.road li{position:relative;padding:0 0 14px 44px;min-height:30px}
+.road .r-dot{position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font:800 14px/1 var(--body);background:var(--surface);border:3px solid var(--ok);color:var(--ok);box-sizing:border-box}
+.road .r-item.k-task .r-dot{background:var(--ok);color:#fff}
+.road .r-item.k-goal .r-dot{background:#e0a800;border-color:#e0a800;color:#fff;font-size:15px}
+.road .r-item.k-event .r-dot{border-color:var(--brand);background:var(--surface)}
+.road .r-item.empty .r-dot{border-style:dashed;border-color:var(--line)}
+.road .r-now .r-dot{background:#1f78b4;border-color:#1f78b4;box-shadow:0 0 0 5px rgba(31,120,180,.18)}
+.road .r-start .r-dot{background:var(--ink,#000);border-color:var(--ink,#000)}
+.road .r-month{padding:6px 0 12px 44px;min-height:0}
+.road .r-month span{font:700 12px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--surface);padding:0 6px;margin-left:-6px}
+.r-body{display:flex;flex-direction:column;gap:4px;padding-top:4px}
+.r-line{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.r-date{font:700 13px var(--mono);color:var(--muted);min-width:44px}
+.r-text{font-weight:600;font-size:15px}
+.r-item.k-goal .r-text{font-weight:800}
+.r-meta{display:flex;gap:6px;flex-wrap:wrap;padding-left:54px}
+.r-who{font-size:13px;color:var(--muted)}
+.r-tag{font:600 11.5px var(--mono);padding:2px 6px;border-radius:5px;background:var(--sunk,#f2f0f3);color:var(--muted)}
+.r-sub{font-size:13px;color:var(--muted)}
+.r-line .j-del{margin-left:auto}
+@media (max-width:520px){.road-stats{grid-template-columns:1fr 1fr 1fr}.rs b{font-size:21px}.r-meta{padding-left:0}}
 .join-code{margin:0;font-size:15px}.join-code b{font:700 18px var(--mono);letter-spacing:.12em;background:var(--accent-soft);padding:2px 8px;border-radius:6px}
 .acct-hint{margin:0 0 6px;color:#5b5560;font-size:14px}.acct-mail{display:block;color:#5b5560}
 .att-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.att{position:relative;display:block;width:96px;height:96px;border-radius:10px;overflow:hidden;border:1px solid #ddd;background:#f4f2f5 repeating-conic-gradient(#eee 0 25%,#fff 0 50%) 0 0/16px 16px;margin:0}.att img{width:100%;height:100%;object-fit:contain}.att.missing::after{content:"Příloha chybí";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:#777;text-align:center}.att-x{position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;border:0;background:#000;color:#fff;font-size:15px;line-height:1;cursor:pointer;padding:0}.att-add{background:#fff;border:1.5px dashed #a970b9;color:#000;font-weight:700}.att-hint{margin:2px 0 0;font-size:12.5px;color:#5b5560}.sub-text{white-space:pre-wrap;display:block}.sub-text a{color:#1f78b4;word-break:break-all}
@@ -473,7 +510,7 @@ select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px
         <ul class="rank-log" id="rank-log"></ul>
         <details class="roles-help"><summary>Jak se počítají body</summary>
           <dl class="roles-legend"><dt>Rychlovka</dt><dd>10 b · drobnost, stačí odškrtnout</dd><dt>Standard</dt><dd>25 b · běžný úkol</dd><dt>Náročný</dt><dd>50 b · větší práce na víc dní</dd><dt>Boss</dt><dd>100 b · velká věc pro celý tým</dd><dt>Dokončení</dt><dd>když úkol splní všichni, komu byl zadaný: úkol pro všechny +50 %, pro 2 lidi +30 %, pro 1 člověka +10 % (pro 3 a víc vybraných +40 %)</dd><dt>Cíl</dt><dd>250 b za každý splněný cíl na mapě</dd></dl>
-          <p>Každá liga má 30 levelů. Během ligy se barva mění: Měď (1–5), Bronz (6–10), Stříbro (11–15), Zlato (16–20), Platina (21–25), Diamant (26–30). Každá liga je jeden díl výpravy: Vol. 1 → Vol. 2 → Vol. 3. Každých 5 levelů doletíte na novou planetu, na levelu 30 na cílovou planetu dílu. Každý level potřebuje o 10 bodů víc než předchozí (50, 60, 70…).</p><p>Týdenní série: kolik týdnů po sobě tým splnil aspoň jeden úkol.</p>
+          <p>Každá liga má 30 levelů. Během ligy se barva mění: Měď (1–5), Bronz (6–10), Stříbro (11–15), Zlato (16–20), Platina (21–25), Diamant (26–30). Každý level potřebuje o 10 bodů víc než předchozí (50, 60, 70…).</p><p>Týdenní série: kolik týdnů po sobě tým splnil aspoň jeden úkol.</p>
         </details>
       </div>
     </section>
@@ -487,6 +524,7 @@ select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px
       <div class="planet-card" id="planetCard" hidden></div>
       <div class="space-ctl"><button type="button" id="cam-in" aria-label="Přiblížit">+</button><button type="button" id="cam-out" aria-label="Oddálit">−</button><button type="button" id="cam-home">Na střed</button></div>
     </div>
+    <section class="panel road-box" id="road"></section>
     <section class="panel" id="quests"></section>
     <section class="panel" id="journal"></section>
     <section class="panel" id="panel"><h3>Mapa je zatím prázdná</h3><p>Cíle se tu objeví, až je owner přidá.</p></section>
@@ -1097,8 +1135,8 @@ function renderPanel(){
   const canEdit = mgr() && state.db;
   if (!n) {
     const empty = !state.nodes.length;
-    p.replaceChildren(el("h3", {text: empty ? "Mapa je zatím prázdná" : "Klikni na cíl"}),
-      el("p", {text: empty ? (canEdit ? "Klikni na AUTACI uprostřed a přidej první cíl. Z každého cíle pak můžeš pokračovat dalšími." : "Až owner přidá první cíle, objeví se tady.") : "U každého cíle uvidíš, co znamená a co je potřeba splnit, aby se odemkl."}));
+    p.replaceChildren(el("h3", {text: empty ? "Zatím žádné cíle" : "Vyber cíl"}),
+      el("p", {text: empty ? (canEdit ? "Klikni níž na Nový cíl a přidej první cíl týmu." : "Až owner přidá první cíle, objeví se tady.") : "Klikni nahoře na cíl a uvidíš podrobnosti."}));
     return;
   }
   const st = nodeState(n), isRoot = n.id === ROOT_ID;
@@ -1117,13 +1155,14 @@ function renderPanel(){
     const tid = "nn-title", did = "nn-desc";
     kids.push(el("form", {class:"form", onsubmit: ev => {
       ev.preventDefault();
-      const title = $(tid).value.trim(), desc = $(did).value.trim();
+      const title = $(tid).value.trim(), desc = $(did).value.trim(), due = ($("nn-due") || {}).value || "";
       if (!title) { toast("Napiš název cíle"); return; }
       const id = "n" + Date.now().toString(36);
-      saveTree([...state.nodes, {id, title: title.slice(0, 60), desc, parent: n.id}], state.tree, "Cíl přidán");
+      saveTree([...state.nodes, {id, title: title.slice(0, 60), desc, parent: n.id, due}], state.tree, "Cíl přidán");
     }},
-      el("label", {class:"lbl", for:tid}, isRoot ? "Nová cesta z Autaci" : "Navazující cíl", el("input", {type:"text", id:tid, maxlength:"60", placeholder:"Např. První zakázka"})),
+      el("label", {class:"lbl", for:tid}, isRoot ? "Nový cíl" : "Navazující cíl", el("input", {type:"text", id:tid, maxlength:"60", placeholder:"Např. První zakázka"})),
       el("label", {class:"lbl", for:did}, "Popis (nepovinný)", el("input", {type:"text", id:did, maxlength:"200", placeholder:"Co přesně musíme splnit"})),
+      el("label", {class:"lbl", for:"nn-due"}, "Termín (nepovinný)", el("input", {type:"date", id:"nn-due"})),
       el("div", {class:"btns"}, el("button", {type:"submit", class:"primary", text:"Přidat cíl"}))));
     if (!isRoot && !childrenOf(n.id).length) {
       if (state.confirmNode === "del") kids.push(el("div", {class:"btns"},
@@ -2143,6 +2182,104 @@ function drawCinema(ctx, W, H){
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 }
 
+// ---- Přehledná Cesta: kde jsme, cíle a časová osa toho, co máme za sebou ----
+const MONTHS_CZ = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+function isoOf(ts){ const d = new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function doneAt(t){ return Math.max(0, ...assigneesOf(t).map(uid => (state.subs[key(t.id, uid)] || {}).submittedAt || 0)) || t.createdAt || Date.now(); }
+function roadItems(){
+  const out = [], seenTask = {};
+  for (const e of state.events) {
+    const t = e.taskId ? state.tasks.find(x => x.id === e.taskId) : null;
+    if (t && t.private) continue;
+    if (e.taskId) seenTask[e.taskId] = true;
+    out.push({kind: t ? "task" : "event", date: e.date || isoOf(e.createdAt || Date.now()), at: e.createdAt || 0, text: e.text, task: t, evId: e.id});
+  }
+  for (const t of state.tasks) {
+    if (t.private || seenTask[t.id] || !taskDone(t)) continue;
+    const at = doneAt(t); out.push({kind:"task", date: isoOf(at), at, text: t.title || "Splněný úkol", task: t});
+  }
+  for (const n of state.nodes) if (n.id !== ROOT_ID && state.tree[n.id]) out.push({kind:"goal", date: isoOf(state.tree[n.id]), at: state.tree[n.id], text: n.title});
+  return out.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : b.at - a.at);
+}
+function renderRoad(){
+  const box = $("road"); if (!box) return;
+  const items = roadItems();
+  const doneTasks = state.tasks.filter(t => !t.private && taskDone(t)).length;
+  const openTasks = state.tasks.filter(t => !t.private && !taskDone(t) && (assigneesOf(t).length)).length;
+  const goals = state.nodes.filter(n => n.id !== ROOT_ID);
+  const goalsDone = goals.filter(n => state.tree[n.id]).length;
+  const kids = [];
+
+  // 1) přehled
+  kids.push(el("div", {class:"road-stats"},
+    el("div", {class:"rs"}, el("b", {text: String(doneTasks)}), el("span", {text:"splněných úkolů"})),
+    el("div", {class:"rs"}, el("b", {text: String(openTasks)}), el("span", {text:"úkolů rozděláno"})),
+    el("div", {class:"rs"}, el("b", {text: goalsDone + "/" + goals.length}), el("span", {text:"splněných cílů"}))));
+
+  // 2) cíle
+  const cur = goals.filter(n => !state.tree[n.id]);
+  if (cur.length) {
+    const g = el("div", {class:"road-goals"});
+    for (const n of cur) {
+      let when = null;
+      if (n.due) { const d = daysLeft(n.due); when = el("span", {class:"rg-due" + (d < 0 ? " late" : d <= 14 ? " soon" : ""), text: "do " + fmtShort(n.due) + " · " + (d < 0 ? "po termínu" : d === 0 ? "dnes" : "zbývá " + d + (d === 1 ? " den" : d < 5 ? " dny" : " dní"))}); }
+      g.append(el("button", {type:"button", class:"road-goal" + (state.selNode === n.id ? " sel" : ""), onclick:()=>{ state.selNode = n.id; state.confirmNode = false; renderTree(); $("panel").scrollIntoView({behavior:"smooth", block:"nearest"}); }},
+        el("small", {text:"🎯 Cíl"}), el("b", {text:n.title}), n.desc ? el("span", {class:"rg-desc", text:n.desc}) : null, when));
+    }
+    kids.push(g);
+  }
+
+  // 3) časová osa
+  const tl = el("ol", {class:"road"});
+  tl.append(el("li", {class:"r-now"}, el("span", {class:"r-dot", "aria-hidden":"true"}), el("div", {class:"r-body"}, el("b", {text:"Teď"}), el("span", {class:"r-sub", text: openTasks ? "Máme rozdělaných " + openTasks + (openTasks === 1 ? " úkol" : openTasks < 5 ? " úkoly" : " úkolů") + "." : "Zrovna nic rozdělaného."}))));
+  let month = "";
+  const canEdit = mgr() && state.db;
+  for (const it of items) {
+    const [y, m, d] = it.date.split("-").map(Number), mk = y + "-" + m;
+    if (mk !== month) { month = mk; tl.append(el("li", {class:"r-month"}, el("span", {text: MONTHS_CZ[m - 1] + " " + y}))); }
+    const meta = [];
+    if (it.task) {
+      const who = assigneesOf(it.task).map(nameOf).join(", ");
+      if (who) meta.push(el("span", {class:"r-who", text: who}));
+      const w = WEIGHTS[taskWeight(it.task)]; if (w) meta.push(el("span", {class:"r-tag", text: w.name}));
+    }
+    const li = el("li", {class:"r-item k-" + it.kind},
+      el("span", {class:"r-dot", "aria-hidden":"true", text: it.kind === "goal" ? "★" : it.kind === "task" ? "✓" : ""}),
+      el("div", {class:"r-body"},
+        el("div", {class:"r-line"}, el("span", {class:"r-date", text: d + ". " + m + "."}), el("span", {class:"r-text", text: (it.kind === "goal" ? "Splněný cíl: " : "") + it.text})),
+        meta.length ? el("div", {class:"r-meta"}, ...meta) : null));
+    if (canEdit && it.evId) {
+      if (state.delEvent === it.evId) li.querySelector(".r-body").append(el("div", {class:"btns"},
+        el("button", {type:"button", class:"badb", onclick: async () => { try { await state.db.doc("events/"+it.evId).delete(); state.delEvent = null; toast("Zápis odebrán"); } catch(err){ handleWriteError(err); } }, text:"Ano, odebrat"}),
+        el("button", {type:"button", onclick: () => { state.delEvent = null; renderRoad(); }, text:"Zpět"})));
+      else li.querySelector(".r-line").append(el("button", {type:"button", class:"j-del", "aria-label":"Odebrat zápis", onclick: () => { state.delEvent = it.evId; renderRoad(); }, text:"Odebrat"}));
+    }
+    tl.append(li);
+  }
+  if (!items.length) tl.append(el("li", {class:"r-item empty"}, el("span", {class:"r-dot", "aria-hidden":"true"}), el("div", {class:"r-body"}, el("span", {class:"r-text", text:"Tady se objeví všechno, co tým splní: hotové úkoly, splněné cíle a důležité události."}))));
+  const start = Math.min((window.__appConfig && window.__appConfig.createdAt) || Date.now(), ...items.map(i => { const [y, m, d] = i.date.split("-").map(Number); return new Date(y, m - 1, d).getTime(); }));
+  tl.append(el("li", {class:"r-start"}, el("span", {class:"r-dot", "aria-hidden":"true"}), el("div", {class:"r-body"}, el("b", {text:"Start týmu Autaci"}), el("span", {class:"r-sub", text: new Date(start).toLocaleDateString("cs-CZ")}))));
+  kids.push(el("h3", {class:"road-h", text:"Co máme za sebou"}), tl);
+  box.replaceChildren(...kids);
+}
+function renderQuests(){
+  const box = $("quests"); if (!box) return;
+  const canEdit = mgr() && state.db;
+  box.hidden = !canEdit;
+  if (!canEdit) return;
+  const done = state.nodes.filter(n => n.id !== ROOT_ID && state.tree[n.id]);
+  const kids = [el("h3", {text:"Správa cílů"}), el("p", {text:"Přidej nový cíl, nebo klikni na cíl nahoře a označ ho jako splněný."})];
+  const list = el("div", {class:"quest-list"});
+  for (const n of done) list.append(el("button", {type:"button", class:"quest done" + (state.selNode === n.id ? " sel" : ""), onclick:()=>{ state.selNode = n.id; state.confirmNode = false; renderTree(); }}, el("span", {class:"q-dot", text:"✓"}), el("span", {class:"q-t", text:n.title})));
+  list.append(el("button", {type:"button", class:"quest add", onclick:()=>{ state.selNode = ROOT_ID; state.confirmNode = false; renderTree(); }}, el("span", {class:"q-dot", text:"+"}), el("span", {class:"q-t", text:"Nový cíl"})));
+  kids.push(list); box.replaceChildren(...kids);
+}
+function renderTree(){
+  renderLevel(); renderRoad(); renderQuests(); renderPanel(); renderJournal();
+  const p = $("panel"); if (p) p.hidden = !state.selNode;
+  const j = $("journal"); if (j) { j.hidden = !(mgr() && state.db); const h = j.querySelector("h3"); if (h) h.textContent = "Zapsat událost na cestu"; }
+}
+
 // ---- Schránka (jen owner): co kdo udělal ----
 function inboxItems(){
   const out = [], all = state.membersAll || {};
@@ -2188,7 +2325,7 @@ function showView(){
   let v = location.hash === "#cesta" ? "cesta" : location.hash === "#tym" ? "tym" : location.hash === "#sprava" ? "sprava" : location.hash === "#schranka" ? "schranka" : "ukoly";
   if ((v === "sprava" || v === "schranka") && !state.owner) v = "ukoly";
   for (const k of ["ukoly","cesta","tym","schranka","sprava"]) { $("view-"+k).hidden = v !== k; $("tab-"+k).setAttribute("aria-current", v === k ? "page" : "false"); }
-  if (v === "cesta") requestAnimationFrame(() => { if (!state.camHomed) homeCam(); else drawStars(); startWarp(); });
+  if (v === "cesta") renderTree();
 }
 window.addEventListener("hashchange", showView);
 showView();
