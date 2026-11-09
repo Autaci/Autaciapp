@@ -395,6 +395,7 @@ select{font:600 14px var(--body);border:1px solid var(--line);border-radius:10px
 .road li{position:relative;padding:0 0 14px 44px;min-height:30px}
 .road .r-dot{position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font:800 14px/1 var(--body);background:var(--surface);border:3px solid var(--ok);color:var(--ok);box-sizing:border-box}
 .road .r-item.k-task .r-dot{background:var(--ok);color:#fff}
+.road .r-item.k-part .r-dot{background:var(--surface);color:var(--ok)}
 .road .r-item.k-goal .r-dot{background:#e0a800;border-color:#e0a800;color:#fff;font-size:15px}
 .road .r-item.k-event .r-dot{border-color:var(--brand);background:var(--surface)}
 .road .r-item.empty .r-dot{border-style:dashed;border-color:var(--line)}
@@ -2196,8 +2197,14 @@ function roadItems(){
     out.push({kind: t ? "task" : "event", date: e.date || isoOf(e.createdAt || Date.now()), at: e.createdAt || 0, text: e.text, task: t, evId: e.id});
   }
   for (const t of state.tasks) {
-    if (t.private || seenTask[t.id] || !taskDone(t)) continue;
-    const at = doneAt(t); out.push({kind:"task", date: isoOf(at), at, text: t.title || "Splněný úkol", task: t});
+    if (seenTask[t.id]) continue;
+    if (taskDone(t)) { const at = doneAt(t); out.push({kind:"task", date: isoOf(at), at, text: t.title || "Splněný úkol", task: t}); continue; }
+    // rozdělaný úkol: kdo už má svou část hotovou
+    for (const uid of assigneesOf(t)) {
+      if (personState(t, uid) !== "ok") continue;
+      const at = (state.subs[key(t.id, uid)] || {}).submittedAt || t.createdAt || Date.now();
+      out.push({kind:"part", date: isoOf(at), at, text: t.title || "Úkol", task: t, who: uid});
+    }
   }
   for (const n of state.nodes) if (n.id !== ROOT_ID && state.tree[n.id]) out.push({kind:"goal", date: isoOf(state.tree[n.id]), at: state.tree[n.id], text: n.title});
   return out.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : b.at - a.at);
@@ -2240,14 +2247,14 @@ function renderRoad(){
     if (mk !== month) { month = mk; tl.append(el("li", {class:"r-month"}, el("span", {text: MONTHS_CZ[m - 1] + " " + y}))); }
     const meta = [];
     if (it.task) {
-      const who = assigneesOf(it.task).map(nameOf).join(", ");
+      const who = it.who ? nameOf(it.who) + " má svou část hotovou" : assigneesOf(it.task).map(nameOf).join(", ");
       if (who) meta.push(el("span", {class:"r-who", text: who}));
       const w = WEIGHTS[taskWeight(it.task)]; if (w) meta.push(el("span", {class:"r-tag", text: w.name}));
     }
     const li = el("li", {class:"r-item k-" + it.kind},
-      el("span", {class:"r-dot", "aria-hidden":"true", text: it.kind === "goal" ? "★" : it.kind === "task" ? "✓" : ""}),
+      el("span", {class:"r-dot", "aria-hidden":"true", text: it.kind === "goal" ? "★" : it.kind === "task" || it.kind === "part" ? "✓" : ""}),
       el("div", {class:"r-body"},
-        el("div", {class:"r-line"}, el("span", {class:"r-date", text: d + ". " + m + "."}), el("span", {class:"r-text", text: (it.kind === "goal" ? "Splněný cíl: " : "") + it.text})),
+        el("div", {class:"r-line"}, el("span", {class:"r-date", text: d + ". " + m + "."}), el("span", {class:"r-text", text: (it.kind === "goal" ? "Splněný cíl: " : "") + (it.task && it.task.private ? "🔒 " : "") + it.text})),
         meta.length ? el("div", {class:"r-meta"}, ...meta) : null));
     if (canEdit && it.evId) {
       if (state.delEvent === it.evId) li.querySelector(".r-body").append(el("div", {class:"btns"},
